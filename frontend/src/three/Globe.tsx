@@ -468,7 +468,7 @@ export const Globe: React.FC<GlobeProps> = ({
     const animate = () => {
       frame = requestAnimationFrame(animate);
       controls.update();
-      globeGroup.rotation.y += 0.0007;
+      // No auto-rotation: the globe stays where the user leaves it.
       renderer.render(scene, camera);
     };
     animate();
