@@ -382,14 +382,70 @@ export const Globe: React.FC<GlobeProps> = ({
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
+
+    // Hover tooltip for satellites + region markers
+    let tooltip: HTMLDivElement | null = null;
+    const ensureTooltip = () => {
+      if (tooltip) return tooltip;
+      tooltip = document.createElement('div');
+      tooltip.className =
+        'pointer-events-none absolute z-40 rounded-md border border-slate-600 bg-slate-900/95 px-2 py-1 text-[10px] text-slate-100 shadow-xl';
+      tooltip.style.display = 'none';
+      mount.appendChild(tooltip);
+      return tooltip;
+    };
+
+    const onPointerMove = (ev: MouseEvent) => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+
+      const satHits = raycaster.intersectObjects(satsGroup.children, false);
+      const regionHits = raycaster.intersectObjects(regionMarkers.children, false);
+      const sat = satHits[0];
+      const region = regionHits[0];
+
+      let text = '';
+      if (sat && (!region || sat.distance <= region.distance)) {
+        const name = (sat.object.userData.satName as string) ?? 'Satellite';
+        const cat = (sat.object.userData.category as string) ?? 'other';
+        text = `<b>${name}</b><br/><span style="color:#94a3b8">${cat}</span>`;
+      } else if (region) {
+        const id = region.object.userData.regionId as string;
+        const r = dataRef.current.regions.find((x) => x.id === id);
+        if (r) {
+          text = `<b>${r.name}</b><br/><span style="color:#94a3b8">index ${r.composite_index.toFixed(
+            1
+          )} · ${r.severity_label}</span>`;
+        }
+      }
+
+      const tip = ensureTooltip();
+      if (text) {
+        tip.innerHTML = text;
+        tip.style.display = 'block';
+        const mountRect = mount.getBoundingClientRect();
+        tip.style.left = `${ev.clientX - mountRect.left + 12}px`;
+        tip.style.top = `${ev.clientY - mountRect.top + 12}px`;
+        renderer.domElement.style.cursor = 'pointer';
+      } else {
+        tip.style.display = 'none';
+        renderer.domElement.style.cursor = 'grab';
+      }
+    };
+    renderer.domElement.addEventListener('pointermove', onPointerMove);
+
     const onClick = (ev: MouseEvent) => {
       const rect = renderer.domElement.getBoundingClientRect();
       pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
-      const hits = raycaster.intersectObjects(regionMarkers.children, false);
-      if (hits.length > 0) {
-        const id = hits[0].object.userData.regionId as string;
+      const satHits = raycaster.intersectObjects(satsGroup.children, false);
+      const regionHits = raycaster.intersectObjects(regionMarkers.children, false);
+      // Satellites win ties; regions select on click.
+      if (regionHits.length > 0 && (satHits.length === 0 || regionHits[0].distance < satHits[0].distance)) {
+        const id = regionHits[0].object.userData.regionId as string;
         onSelectRegion(id === dataRef.current.selectedRegionId ? null : id);
       }
     };
@@ -429,6 +485,9 @@ export const Globe: React.FC<GlobeProps> = ({
       cancelAnimationFrame(frame);
       window.removeEventListener('resize', onResize);
       renderer.domElement.removeEventListener('click', onClick);
+      renderer.domElement.removeEventListener('pointermove', onPointerMove);
+      if (tooltip && tooltip.parentElement === mount) mount.removeChild(tooltip);
+      tooltip = null;
       controls.dispose();
       renderer.dispose();
       if (renderer.domElement.parentElement === mount) mount.removeChild(renderer.domElement);
