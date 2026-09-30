@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+sqlalchemy
+geoalchemy2
+shapely
+sgp4
+psycopg2-binary
+requests
+alembic
+pydantic-settings
+scikit-learn
+pandas
+numpy
+httpx
+python-dotenv
+pytest
+pytest-asyncio
