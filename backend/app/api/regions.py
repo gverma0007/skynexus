@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -28,6 +30,34 @@ def get_regions(db: Session = Depends(get_db)):
     return [
         {"id": str(r.id), "name": r.name} for r in regions
     ]
+
+
+@router.get("/regions/outline")
+def get_region_outlines(db: Session = Depends(get_db)):
+    """Zone boundary rings as lat/lon lists, for globe outlines."""
+    disruptions = {d["region_id"]: d for d in compute_all_disruptions(db)}
+    rows = db.query(
+        Region.id,
+        Region.name,
+        func.ST_AsGeoJSON(Region.geom).label("geojson"),
+    ).all()
+    outlines = []
+    for region_id, name, geojson in rows:
+        if not geojson:
+            continue
+        geom = json.loads(geojson)
+        ring = geom["coordinates"][0]  # outer ring: list of [lon, lat] pairs
+        d = disruptions.get(str(region_id), {})
+        outlines.append(
+            {
+                "id": str(region_id),
+                "name": name,
+                "ring": [[float(lat), float(lon)] for lon, lat in ring],
+                "severity_label": d.get("severity_label", "normal"),
+                "composite_index": d.get("composite_index", 0.0),
+            }
+        )
+    return outlines
 
 
 @router.get("/regions/map")

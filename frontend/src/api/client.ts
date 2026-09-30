@@ -1,5 +1,14 @@
 // Typed API client matching the SkyNexus backend endpoints.
 
+export interface RegionOutline {
+  id: string;
+  name: string;
+  /** Outer boundary ring as [lat, lon] pairs. */
+  ring: [number, number][];
+  severity_label: string;
+  composite_index: number;
+}
+
 export interface RegionMapPoint {
   id: string;
   name: string;
@@ -158,6 +167,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getRegionsMap: () => request<RegionMapPoint[]>('/regions/map'),
+  getRegionOutlines: () => request<RegionOutline[]>('/regions/outline'),
   getLiveFlights: () => request<FlightArc[]>('/flights/live'),
   getLiveSatellites: () => request<SatelliteTrack[]>('/satellites/live'),
   getSatelliteDetail: (noradId: number) =>

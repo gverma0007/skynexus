@@ -4,10 +4,17 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { feature } from 'topojson-client';
 import { SEVERITY_HEX, severityOf } from '../lib/severity';
 import { satCategoryOf, SAT_CATEGORIES } from '../lib/satellites';
-import type { EventItem, FlightArc, RegionMapPoint, SatelliteTrack } from '../api/client';
+import type {
+  EventItem,
+  FlightArc,
+  RegionMapPoint,
+  RegionOutline,
+  SatelliteTrack,
+} from '../api/client';
 
 interface GlobeProps {
   regions: RegionMapPoint[];
+  outlines?: RegionOutline[];
   flights: FlightArc[];
   satellites: SatelliteTrack[];
   events: EventItem[];
@@ -275,6 +282,7 @@ function arcCurve(start: THREE.Vector3, end: THREE.Vector3): THREE.QuadraticBezi
 
 export const Globe: React.FC<GlobeProps> = ({
   regions,
+  outlines = [],
   flights,
   satellites,
   events,
@@ -695,6 +703,76 @@ export const Globe: React.FC<GlobeProps> = ({
       satsGroup.add(shell);
     }
   }, [satellites, visibleSatCategories]);
+
+  /* ---------------- sync zone outlines ---------------- */
+  useEffect(() => {
+    const { scene } = refs.current;
+    if (!scene) return;
+
+    const existing = scene.getObjectByName('zoneOutlines');
+    if (existing) {
+      scene.remove(existing);
+      existing.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (mesh.geometry) mesh.geometry.dispose();
+        if (mesh.material) (mesh.material as THREE.Material).dispose();
+      });
+    }
+
+    if (outlines.length === 0) return;
+
+    const outlineGroup = new THREE.Group();
+    outlineGroup.name = 'zoneOutlines';
+
+    for (const zone of outlines) {
+      const severity = severityOf(zone.composite_index);
+      const color = SEVERITY_HEX[severity];
+      const isActive = severity !== 'normal';
+      const isSelected = zone.id === selectedRegionId;
+
+      // Boundary line, lifted above the surface
+      const pts = zone.ring.map(([lat, lon]) => latLonToVec3(lat, lon, R * 1.012));
+      const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
+      outlineGroup.add(
+        new THREE.Line(
+          lineGeo,
+          new THREE.LineBasicMaterial({
+            color: isSelected ? 0xf8fafc : color,
+            transparent: true,
+            opacity: isSelected ? 1 : isActive ? 0.75 : 0.28,
+          })
+        )
+      );
+
+      // Soft fill only for active or selected zones
+      if (isActive || isSelected) {
+        const triangles = triangulateRing(zone.ring);
+        if (triangles.length > 0) {
+          const fillGeo = new THREE.BufferGeometry();
+          const pos = new Float32Array(triangles.length * 3);
+          triangles.forEach((v, i) => {
+            pos[i * 3] = v.x;
+            pos[i * 3 + 1] = v.y;
+            pos[i * 3 + 2] = v.z;
+          });
+          fillGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+          outlineGroup.add(
+            new THREE.Mesh(
+              fillGeo,
+              new THREE.MeshBasicMaterial({
+                color,
+                transparent: true,
+                opacity: isSelected ? 0.16 : 0.07,
+                side: THREE.DoubleSide,
+                depthWrite: false,
+              })
+            )
+          );
+        }
+      }
+    }
+    scene.add(outlineGroup);
+  }, [outlines, selectedRegionId]);
 
   /* ---------------- sync event dots ---------------- */
   useEffect(() => {

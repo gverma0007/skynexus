@@ -23,8 +23,17 @@ import { useAnalysisData } from './hooks/useAnalysisData';
 import { useSelectionStore } from './hooks/useSelectionStore';
 
 export default function App() {
-  const { stats, regions, disruptions, events, pressureZones, loading, error, refresh } =
-    useDashboardData();
+  const {
+    stats,
+    regions,
+    outlines,
+    disruptions,
+    events,
+    pressureZones,
+    loading,
+    error,
+    refresh,
+  } = useDashboardData();
   const { flights, satellites } = useLiveTrackingData();
   const selectedRegionId = useSelectionStore((s) => s.selectedRegionId);
   const setSelectedRegionId = useSelectionStore((s) => s.setSelectedRegionId);
@@ -129,6 +138,7 @@ export default function App() {
           ) : (
             <Globe
               regions={regions}
+              outlines={outlines}
               flights={flights}
               satellites={satellites}
               events={events}
