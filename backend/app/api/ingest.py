@@ -76,6 +76,14 @@ def ingestion_status():
             ),
             "events": str(db.scalar(text("SELECT MAX(event_date) FROM events"))),
         }
+        sat_categories = dict(
+            db.execute(
+                text(
+                    "SELECT COALESCE(category, 'other'), COUNT(*) "
+                    "FROM satellites GROUP BY category"
+                )
+            ).all()
+        )
         source_rows = db.execute(
             text(
                 """
@@ -105,4 +113,10 @@ def ingestion_status():
         ]
     finally:
         db.close()
-    return {"state": _state, "counts": counts, "newest": newest, "sources": sources}
+    return {
+        "state": _state,
+        "counts": counts,
+        "newest": newest,
+        "sources": sources,
+        "satellite_categories": sat_categories,
+    }

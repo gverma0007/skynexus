@@ -33,6 +33,7 @@ export interface SatelliteTrack {
   id: string;
   norad_id: number;
   name: string;
+  category: string;
   lat: number;
   lon: number;
   altitude_km: number;

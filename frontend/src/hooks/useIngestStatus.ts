@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { SAT_CATEGORIES } from '../lib/satellites';
 
 export interface SourceInfo {
   domain: 'flights' | 'satellites' | 'weather' | 'events';
@@ -16,6 +17,7 @@ export interface IngestStatus {
     duration_s: number | null;
   };
   sources: SourceInfo[];
+  satellite_categories?: Record<string, number>;
 }
 
 export const useIngestStatus = () => {
@@ -28,7 +30,15 @@ export const useIngestStatus = () => {
         const res = await fetch('/api/ingest/status');
         if (!res.ok) return;
         const data = (await res.json()) as IngestStatus;
-        if (!cancelled) setStatus(data);
+        if (!cancelled) {
+          // Ensure every known category shows a count (0 default).
+          const cats: Record<string, number> = {};
+          for (const key of Object.keys(SAT_CATEGORIES)) {
+            cats[key] = data.satellite_categories?.[key] ?? 0;
+          }
+          data.satellite_categories = cats;
+          setStatus(data);
+        }
       } catch {
         // status is non-critical; ignore
       }

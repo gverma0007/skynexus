@@ -37,6 +37,7 @@ def get_live_satellites(db: Session = Depends(get_db)):
                 "id": str(sat.id),
                 "norad_id": sat.norad_id,
                 "name": sat.name,
+                "category": sat.category or "other",
                 "lat": lat,
                 "lon": lon,
                 "altitude_km": alt,

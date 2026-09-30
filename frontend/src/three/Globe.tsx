@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { feature } from 'topojson-client';
 import { SEVERITY_HEX, severityOf } from '../lib/severity';
+import { satCategoryOf, SAT_CATEGORIES } from '../lib/satellites';
 import type { EventItem, FlightArc, RegionMapPoint, SatelliteTrack } from '../api/client';
 
 interface GlobeProps {
@@ -12,6 +13,8 @@ interface GlobeProps {
   events: EventItem[];
   selectedRegionId: string | null;
   onSelectRegion: (id: string | null) => void;
+  /** Categories to render; empty set hides the layer. Undefined = all. */
+  visibleSatCategories?: Set<string>;
 }
 
 const R = 1; // globe radius
@@ -275,6 +278,7 @@ export const Globe: React.FC<GlobeProps> = ({
   events,
   selectedRegionId,
   onSelectRegion,
+  visibleSatCategories,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
 
@@ -541,17 +545,24 @@ export const Globe: React.FC<GlobeProps> = ({
     if (!satsGroup) return;
     satsGroup.clear();
 
+    const visible = visibleSatCategories
+      ? satellites.filter((s) => visibleSatCategories.has(satCategoryOf(s.category)))
+      : satellites;
+
     // With a dense constellation, show all markers but keep orbit rings
     // subtle so the shell reads as a swarm, not a tangle.
-    const dense = satellites.length > 15;
-    for (const sat of satellites) {
+    const dense = visible.length > 15;
+    for (const sat of visible) {
+      const cat = satCategoryOf(sat.category);
+      const color = SAT_CATEGORIES[cat].hex;
       const alt = Math.min(Math.max(sat.altitude_km / 20000, 0.08), 0.35);
       const pos = latLonToVec3(sat.lat, sat.lon, R + alt);
       const marker = new THREE.Mesh(
         new THREE.OctahedronGeometry(dense ? 0.013 : 0.02),
-        new THREE.MeshBasicMaterial({ color: 0xfbbf24 })
+        new THREE.MeshBasicMaterial({ color })
       );
       marker.position.copy(pos);
+      marker.userData = { satName: sat.name, category: cat };
       satsGroup.add(marker);
 
       if (!dense) {
@@ -559,7 +570,7 @@ export const Globe: React.FC<GlobeProps> = ({
         const ring = new THREE.Mesh(
           new THREE.RingGeometry(R + alt - 0.004, R + alt + 0.004, 96),
           new THREE.MeshBasicMaterial({
-            color: 0x92400e,
+            color,
             transparent: true,
             opacity: 0.25,
             side: THREE.DoubleSide,
@@ -582,7 +593,7 @@ export const Globe: React.FC<GlobeProps> = ({
       );
       satsGroup.add(shell);
     }
-  }, [satellites]);
+  }, [satellites, visibleSatCategories]);
 
   /* ---------------- sync event dots ---------------- */
   useEffect(() => {

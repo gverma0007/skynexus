@@ -13,6 +13,8 @@ import RegionDrawer from './components/RegionDrawer';
 import Legend from './components/Legend';
 import DataSourceBadges from './components/DataSourceBadges';
 import { useIngestStatus } from './hooks/useIngestStatus';
+import { SAT_CATEGORIES } from './lib/satellites';
+import type { SatCategory } from './lib/satellites';
 import { useDashboardData } from './hooks/useDashboardData';
 import { useLiveTrackingData } from './hooks/useLiveTrackingData';
 import { useAnalysisData } from './hooks/useAnalysisData';
@@ -27,6 +29,14 @@ export default function App() {
     useAnalysisData(selectedRegionId);
 
   const ingestStatus = useIngestStatus();
+  const [hiddenSatCats, setHiddenSatCats] = useState<Set<SatCategory>>(new Set());
+  const toggleSatCat = (cat: SatCategory) =>
+    setHiddenSatCats((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
   const [modalOpen, setModalOpen] = useState(false);
   const [clock, setClock] = useState<Date | null>(null);
 
@@ -112,13 +122,26 @@ export default function App() {
               events={events}
               selectedRegionId={selectedRegionId}
               onSelectRegion={setSelectedRegionId}
+              visibleSatCategories={
+                hiddenSatCats.size > 0
+                  ? new Set(
+                      (Object.keys(SAT_CATEGORIES) as SatCategory[]).filter(
+                        (c) => !hiddenSatCats.has(c)
+                      )
+                    )
+                  : undefined
+              }
             />
           )}
           {/* Globe overlays */}
           <div className="pointer-events-none absolute bottom-3 left-3 text-[10px] uppercase tracking-widest text-slate-600">
             Drag to rotate · Click a marker to inspect
           </div>
-          <Legend />
+          <Legend
+            satCounts={ingestStatus?.satellite_categories}
+            hidden={hiddenSatCats}
+            onToggle={toggleSatCat}
+          />
           <RegionDrawer
             region={selectedRegion}
             disruption={selectedDisruption}

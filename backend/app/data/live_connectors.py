@@ -41,30 +41,65 @@ UA = {"User-Agent": "SkyNexus-Prototype/1.0 (contact: demo@skynexus.local)"}
 CACHE_DIR = Path("/tmp/skynexus_cache")
 CACHE_DIR.mkdir(exist_ok=True)
 
-# Celestrak group catalogs -> how many to track from each. Gives a dense,
-# varied constellation: crewed stations, weather sentinels, science probes,
-# navigation fleets and imaging constellations.
-SATELLITE_GROUPS: dict[str, int] = {
-    "stations": 10,
-    "weather": 10,
-    "science": 10,
-    "gps-ops": 8,
-    "galileo": 8,
-    "planet": 14,
+# Celestrak group catalogs -> how many to track from each, mapped to the
+# satellite's functional category so the globe can group/filter by mission.
+SATELLITE_GROUPS: dict[str, tuple[int, str]] = {
+    "stations": (20, "station"),
+    "weather": (20, "weather"),
+    "science": (20, "science"),
+    "gps-ops": (15, "nav"),
+    "galileo": (15, "nav"),
+    "planet": (30, "earthobs"),
+    "starlink": (30, "comms"),
+    "oneweb": (15, "comms"),
+    "iridium-NEXT": (15, "comms"),
+}
+
+CATEGORY_LABELS: dict[str, str] = {
+    "station": "Crewed station",
+    "weather": "Weather",
+    "science": "Science",
+    "nav": "Navigation",
+    "earthobs": "Earth observation",
+    "comms": "Communications",
 }
 
 # Legacy list kept for TLE cache naming of the old five.
 TRACKED_SATELLITES = [25544, 48274, 43205, 29155, 37849]
 
 # Regions likely to have live traffic; used for the adsb point queries.
-# Multiple probe points per region widen coverage of each 250nm circle.
+# Multiple probe points per region widen coverage of each search circle.
 REGION_QUERY_POINTS: dict[str, list[tuple[float, float]]] = {
-    "Middle East": [(25.0, 47.5), (25.2, 55.3), (29.2, 47.9)],
-    "Eastern Europe": [(50.0, 32.5), (52.1, 20.9), (44.4, 26.1)],
-    "South China Sea": [(12.5, 112.5), (1.36, 103.99), (22.3, 113.9)],
-    "North Atlantic": [(45.0, -25.0), (51.47, -0.45), (63.98, -22.6)],
-    "Pacific": [(0.0, -170.0), (21.3, -157.9), (35.77, 140.39)],
+    "Middle East": [
+        (25.0, 47.5), (25.2, 55.3), (29.2, 47.9),
+        (21.5, 39.2),   # Jeddah
+        (32.0, 34.9),   # Tel Aviv
+    ],
+    "Eastern Europe": [
+        (50.0, 32.5), (52.1, 20.9), (44.4, 26.1),
+        (47.4, 19.3),   # Budapest
+        (50.4, 30.5),   # Kyiv
+    ],
+    "South China Sea": [
+        (12.5, 112.5), (1.36, 103.99), (22.3, 113.9),
+        (14.5, 121.0),  # Manila
+        (13.7, 100.5),  # Bangkok
+    ],
+    "North Atlantic": [
+        (45.0, -25.0), (51.47, -0.45), (63.98, -22.6),
+        (40.64, -73.78),  # New York
+        (38.7, -9.1),     # Lisbon
+    ],
+    "Pacific": [
+        (0.0, -170.0), (21.3, -157.9), (35.77, 140.39),
+        (-33.94, 151.18),  # Sydney
+        (37.5, 126.9),     # Seoul
+    ],
 }
+
+# ADS-B search radius (nm) and per-region aircraft cap.
+ADSB_RADIUS_NM = 400
+ADSB_MAX_PER_REGION = 40
 
 # Nearest major airport per region — ADS-B gives positions, not routes, so
 # live observations are attached to routes from these hubs.
@@ -115,7 +150,7 @@ def _point_to_wkt(lon: float, lat: float) -> str:
 
 
 # ---------------------------------------------------------------- flights --
-def fetch_live_flights(db: Session, max_per_region: int = 12) -> int:
+def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -> int:
     """Pull live ADS-B positions per region and store the fastest climbers."""
     total = 0
     client = httpx.Client(timeout=20, headers=UA)
@@ -133,7 +168,9 @@ def fetch_live_flights(db: Session, max_per_region: int = 12) -> int:
             primary = points[0]
             for lat, lon in points:
                 try:
-                    res = client.get(f"https://api.adsb.lol/v2/point/{lat}/{lon}/250")
+                    res = client.get(
+                        f"https://api.adsb.lol/v2/point/{lat}/{lon}/{ADSB_RADIUS_NM}"
+                    )
                     if res.status_code == 200:
                         for ac in res.json().get("ac", []) or []:
                             hex_id = (ac.get("hex") or "").strip()
@@ -200,16 +237,15 @@ def _tle_cache_path(norad: int) -> Path:
     return CACHE_DIR / f"tle_{norad}.txt"
 
 
-def _fetch_group_tles(max_per_group: dict[str, int]) -> list[tuple[str, int, str, str]]:
-    """Fetch (name, norad, l1, l2) from Celestrak group catalogs, cached 12h.
-
-    Uses the classic 3-line TLE text format (name + two element lines).
-    """
-    combined: list[tuple[str, int, str, str]] = []
+def _fetch_group_tles(
+    max_per_group: dict[str, tuple[int, str]]
+) -> list[tuple[str, int, str, str, str]]:
+    """Fetch (name, norad, l1, l2, category) from Celestrak groups, cached 12h."""
+    combined: list[tuple[str, int, str, str, str]] = []
     seen: set[int] = set()
     client = httpx.Client(timeout=30, headers=UA)
     try:
-        for group, take in max_per_group.items():
+        for group, (take, category) in max_per_group.items():
             cache = CACHE_DIR / f"group_{group}.txt"
             lines: list[str] = []
             if cache.exists() and (
@@ -248,7 +284,7 @@ def _fetch_group_tles(max_per_group: dict[str, int]) -> list[tuple[str, int, str
                 if norad in seen or not name:
                     continue
                 seen.add(norad)
-                combined.append((name[:200], norad, l1, l2))
+                combined.append((name[:200], norad, l1, l2, category))
                 taken += 1
     finally:
         client.close()
@@ -304,14 +340,18 @@ def fetch_satellite_positions(db: Session, steps: int = 6, step_minutes: int = 1
 
     total = 0
     now = datetime.now(timezone.utc)
-    for name, norad, l1, l2 in catalog:
+    for name, norad, l1, l2, category in catalog:
         sat = db.query(Satellite).filter(Satellite.norad_id == norad).first()
         if sat is None:
-            sat = Satellite(norad_id=norad, name=name, tle_line1=l1, tle_line2=l2)
+            sat = Satellite(
+                norad_id=norad, name=name, category=category,
+                tle_line1=l1, tle_line2=l2,
+            )
             db.add(sat)
             db.flush()
         else:
-            sat.name, sat.tle_line1, sat.tle_line2 = name, l1, l2
+            sat.name, sat.category = name, category
+            sat.tle_line1, sat.tle_line2 = l1, l2
 
         try:
             satrec = Satrec.twoline2rv(l1, l2)
