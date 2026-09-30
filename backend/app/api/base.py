@@ -9,6 +9,7 @@ from app.api.stats import router as stats_router
 from app.api.what_changed import router as what_changed_router
 from app.api.clock import router as clock_router
 from app.api.ingest import router as ingest_router
+from app.api.pressure_zones import router as pressure_zones_router
 
 router = APIRouter()
 
@@ -22,6 +23,7 @@ router.include_router(stats_router, prefix="/stats", tags=["stats"])
 router.include_router(what_changed_router, prefix="/what-changed", tags=["what-changed"])
 router.include_router(clock_router, prefix="/clock", tags=["clock"])
 router.include_router(ingest_router, prefix="/ingest", tags=["ingest"])
+router.include_router(pressure_zones_router, prefix="/pressure-zones", tags=["pressure-zones"])
 
 @router.get("/")
 async def root():

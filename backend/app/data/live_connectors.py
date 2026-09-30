@@ -76,6 +76,17 @@ TRACKED_SATELLITES = [25544, 48274, 43205, 29155, 37849]
 # Regions likely to have live traffic; used for the adsb point queries.
 # Multiple probe points per region widen coverage of each search circle.
 REGION_QUERY_POINTS: dict[str, list[tuple[float, float]]] = {
+    # Extended zones: single concentrated probe each
+    "Black Sea": [(44.0, 34.0)],
+    "Red Sea": [(20.0, 38.5)],
+    "Taiwan Strait": [(24.0, 120.0)],
+    "Korean Peninsula": [(38.0, 127.5)],
+    "Eastern Mediterranean": [(34.0, 30.0)],
+    "Baltic Sea": [(57.0, 20.0)],
+    "Horn of Africa": [(10.0, 46.0)],
+    "Bay of Bengal": [(13.0, 88.0)],
+    "Caribbean": [(18.0, -73.0)],
+    "Gulf of Guinea": [(3.0, 5.0)],
     "Middle East": [
         (25.0, 47.5), (25.2, 55.3), (29.2, 47.9),
         (21.5, 39.2),   # Jeddah
@@ -132,9 +143,25 @@ ROUTE_ANCHOR_IATA: dict[str, str] = {
     "Pacific": "HNL",
 }
 
+# Nearest hub per extended zone - route context for live aircraft there.
+ZONE_ANCHOR_IATA: dict[str, str] = {
+    "Black Sea": "WAW",
+    "Red Sea": "DXB",
+    "Taiwan Strait": "SIN",
+    "Korean Peninsula": "NRT",
+    "Eastern Mediterranean": "DXB",
+    "Baltic Sea": "WAW",
+    "Horn of Africa": "DXB",
+    "Bay of Bengal": "SIN",
+    "Caribbean": "JFK",
+    "Gulf of Guinea": "LHR",
+}
+
 
 def _nearest_airport(db: Session, region: Region) -> Airport | None:
-    anchor_iata = ROUTE_ANCHOR_IATA.get(region.name)
+    anchor_iata = ROUTE_ANCHOR_IATA.get(region.name) or ZONE_ANCHOR_IATA.get(
+        region.name
+    )
     if anchor_iata:
         airport = db.query(Airport).filter(Airport.iata_code == anchor_iata).first()
         if airport:

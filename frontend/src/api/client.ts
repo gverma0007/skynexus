@@ -128,6 +128,17 @@ export interface SatelliteDetail {
   track: { time: string; lat: number; lon: number; alt_km: number }[];
 }
 
+export interface PressureZone {
+  region_id: string;
+  region_name: string;
+  lat: number;
+  lon: number;
+  pressure_index: number;
+  classification: 'CALM' | 'WATCH' | 'ELEVATED' | 'CRITICAL';
+  description: string;
+  drivers: string[];
+}
+
 export interface ForecastResponse {
   region_id: string;
   region_name: string;
@@ -157,6 +168,7 @@ export const api = {
     request<EventItem[]>(`/events${regionId ? `?region_id=${regionId}` : ''}`),
   getDisruptionIndex: () => request<RegionDisruption[]>('/disruption-index'),
   getStats: () => request<StatsSummary>('/stats'),
+  getPressureZones: () => request<PressureZone[]>('/pressure-zones'),
   getWhatChanged: (regionId: string, hours = 24) =>
     request<WhatChangedReport>(`/what-changed/${regionId}?hours=${hours}`),
   getForecast: (regionId: string) => request<ForecastResponse>(`/what-changed/${regionId}/forecast`),

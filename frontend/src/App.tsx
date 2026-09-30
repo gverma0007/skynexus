@@ -11,6 +11,7 @@ import ForecastPanel from './components/ForecastPanel';
 import WhatChangedModal from './components/WhatChangedModal';
 import RegionDrawer from './components/RegionDrawer';
 import SatelliteDetailCard from './components/SatelliteDetail';
+import PressureZones from './components/PressureZones';
 import Legend from './components/Legend';
 import DataSourceBadges from './components/DataSourceBadges';
 import { useIngestStatus } from './hooks/useIngestStatus';
@@ -22,7 +23,8 @@ import { useAnalysisData } from './hooks/useAnalysisData';
 import { useSelectionStore } from './hooks/useSelectionStore';
 
 export default function App() {
-  const { stats, regions, disruptions, events, loading, error, refresh } = useDashboardData();
+  const { stats, regions, disruptions, events, pressureZones, loading, error, refresh } =
+    useDashboardData();
   const { flights, satellites } = useLiveTrackingData();
   const selectedRegionId = useSelectionStore((s) => s.selectedRegionId);
   const setSelectedRegionId = useSelectionStore((s) => s.setSelectedRegionId);
@@ -103,6 +105,14 @@ export default function App() {
       <main className="grid min-h-0 flex-1 grid-cols-[300px_1fr_340px] gap-4 p-5 pt-16">
         {/* Left panel */}
         <aside className="flex min-h-0 flex-col gap-4">
+          <div className="min-h-0 flex-1">
+            <PressureZones
+              zones={pressureZones}
+              regions={regions}
+              selectedRegionId={selectedRegionId}
+              onSelect={setSelectedRegionId}
+            />
+          </div>
           <RegionalAnomalyList
             disruptions={disruptions}
             selectedRegionId={selectedRegionId}

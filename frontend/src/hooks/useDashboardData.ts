@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { EventItem, RegionDisruption, RegionMapPoint, StatsSummary } from '../api/client';
+import type { EventItem, PressureZone, RegionDisruption, RegionMapPoint, StatsSummary } from '../api/client';
 import { api } from '../api/client';
 import { applyBands } from '../lib/severity';
 
@@ -8,22 +8,25 @@ export const useDashboardData = () => {
   const [regions, setRegions] = useState<RegionMapPoint[]>([]);
   const [disruptions, setDisruptions] = useState<RegionDisruption[]>([]);
   const [events, setEvents] = useState<EventItem[]>([]);
+  const [pressureZones, setPressureZones] = useState<PressureZone[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [s, r, d, e] = await Promise.all([
+      const [s, r, d, e, pz] = await Promise.all([
         api.getStats(),
         api.getRegionsMap(),
         api.getDisruptionIndex(),
         api.getEvents(),
+        api.getPressureZones(),
       ]);
       setStats(s);
       applyBands(s.severity_bands);
       setRegions(r);
       setDisruptions(d);
       setEvents(e);
+      setPressureZones(pz);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
@@ -38,5 +41,5 @@ export const useDashboardData = () => {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  return { stats, regions, disruptions, events, loading, error, refresh };
+  return { stats, regions, disruptions, events, pressureZones, loading, error, refresh };
 };
