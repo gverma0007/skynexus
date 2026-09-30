@@ -49,10 +49,15 @@ SATELLITE_GROUPS: dict[str, tuple[int, str]] = {
     "science": (20, "science"),
     "gps-ops": (15, "nav"),
     "galileo": (15, "nav"),
+    "glo-ops": (15, "nav"),
     "planet": (30, "earthobs"),
-    "starlink": (30, "comms"),
-    "oneweb": (15, "comms"),
+    "spire": (25, "earthobs"),
+    "starlink": (40, "comms"),
+    "oneweb": (20, "comms"),
     "iridium-NEXT": (15, "comms"),
+    "globalstar": (15, "comms"),
+    "orbcomm": (14, "comms"),
+    "sarsat": (20, "science"),
 }
 
 CATEGORY_LABELS: dict[str, str] = {

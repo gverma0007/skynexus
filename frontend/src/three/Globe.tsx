@@ -411,11 +411,24 @@ export const Globe: React.FC<GlobeProps> = ({
 
       const satHits = raycaster.intersectObjects(satsGroup.children, false);
       const regionHits = raycaster.intersectObjects(regionMarkers.children, false);
+      const flightHits = raycaster.intersectObjects(arcsGroup.children, false).filter(
+        (h) => h.object.userData.flightName
+      );
       const sat = satHits[0];
       const region = regionHits[0];
+      const flight = flightHits[0];
 
       let text = '';
-      if (sat && (!region || sat.distance <= region.distance)) {
+      if (
+        flight &&
+        (!sat || flight.distance <= sat.distance) &&
+        (!region || flight.distance <= region.distance)
+      ) {
+        const u = flight.object.userData;
+        text = `<b>✈ ${u.flightName}</b><br/><span style="color:#94a3b8">${Math.round(
+          u.flightAlt
+        ).toLocaleString()} ft · ${Math.round(u.flightSpeed)} kt</span>`;
+      } else if (sat && (!region || sat.distance <= region.distance)) {
         const name = (sat.object.userData.satName as string) ?? 'Satellite';
         const cat = (sat.object.userData.category as string) ?? 'other';
         text = `<b>${name}</b><br/><span style="color:#94a3b8">${cat} · click for details</span>`;
@@ -603,6 +616,11 @@ export const Globe: React.FC<GlobeProps> = ({
         new THREE.MeshBasicMaterial({ color: isLive ? 0xf8fafc : 0xe2e8f0 })
       );
       plane.position.copy(planePos);
+      plane.userData = {
+        flightName: flight.callsign,
+        flightAlt: flight.altitude_ft,
+        flightSpeed: flight.speed_kt,
+      };
       // Point cones along the aircraft heading, laying flat on the globe
       if (isLive && flight.heading_deg != null) {
         const up = planePos.clone().normalize();
