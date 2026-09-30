@@ -320,7 +320,16 @@ export const Globe: React.FC<GlobeProps> = ({
       0.1,
       100
     );
-    camera.position.set(0, 0.9, 2.9);
+    // Face the data on load: most live traffic sits in the Eastern
+    // Hemisphere (Middle East / Europe / Asia), centered near lon 45E.
+    // Park the camera over that longitude at ~25N latitude.
+    {
+      const camR = 2.9;
+      const viewLat = 25;
+      const viewLon = 45;
+      const v = latLonToVec3(viewLat, viewLon, camR);
+      camera.position.copy(v);
+    }
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(mount.clientWidth, mount.clientHeight);
