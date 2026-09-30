@@ -10,6 +10,7 @@ import AIAssessmentPanel from './components/AIAssessmentPanel';
 import ForecastPanel from './components/ForecastPanel';
 import WhatChangedModal from './components/WhatChangedModal';
 import RegionDrawer from './components/RegionDrawer';
+import SatelliteDetailCard from './components/SatelliteDetail';
 import Legend from './components/Legend';
 import DataSourceBadges from './components/DataSourceBadges';
 import { useIngestStatus } from './hooks/useIngestStatus';
@@ -30,6 +31,7 @@ export default function App() {
 
   const ingestStatus = useIngestStatus();
   const [hiddenSatCats, setHiddenSatCats] = useState<Set<SatCategory>>(new Set());
+  const [selectedSatNorad, setSelectedSatNorad] = useState<number | null>(null);
   const toggleSatCat = (cat: SatCategory) =>
     setHiddenSatCats((prev) => {
       const next = new Set(prev);
@@ -122,6 +124,8 @@ export default function App() {
               events={events}
               selectedRegionId={selectedRegionId}
               onSelectRegion={setSelectedRegionId}
+              selectedSatNorad={selectedSatNorad}
+              onSelectSatellite={setSelectedSatNorad}
               visibleSatCategories={
                 hiddenSatCats.size > 0
                   ? new Set(
@@ -137,6 +141,12 @@ export default function App() {
           <div className="pointer-events-none absolute bottom-3 left-3 text-[10px] uppercase tracking-widest text-slate-600">
             Drag to rotate · Click a marker to inspect
           </div>
+          {selectedSatNorad != null && (
+            <SatelliteDetailCard
+              noradId={selectedSatNorad}
+              onClose={() => setSelectedSatNorad(null)}
+            />
+          )}
           <Legend
             satCounts={ingestStatus?.satellite_categories}
             hidden={hiddenSatCats}

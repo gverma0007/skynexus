@@ -103,6 +103,31 @@ export interface MetricDelta {
   summary: string;
 }
 
+export interface SatelliteOrbit {
+  inclination_deg: number;
+  raan_deg: number;
+  eccentricity: number;
+  arg_perigee_deg: number;
+  mean_anomaly_deg: number;
+  mean_motion_revs_per_day: number;
+  period_minutes: number;
+  perigee_alt_km: number;
+  apogee_alt_km: number;
+  epoch: string | null;
+  tle_line1: string;
+  tle_line2: string;
+}
+
+export interface SatelliteDetail {
+  norad_id: number;
+  name: string;
+  category: string;
+  position: { time: string; lat: number; lon: number; alt_km: number } | null;
+  observations: number;
+  orbit: SatelliteOrbit | null;
+  track: { time: string; lat: number; lon: number; alt_km: number }[];
+}
+
 export interface ForecastResponse {
   region_id: string;
   region_name: string;
@@ -124,6 +149,8 @@ export const api = {
   getRegionsMap: () => request<RegionMapPoint[]>('/regions/map'),
   getLiveFlights: () => request<FlightArc[]>('/flights/live'),
   getLiveSatellites: () => request<SatelliteTrack[]>('/satellites/live'),
+  getSatelliteDetail: (noradId: number) =>
+    request<SatelliteDetail>(`/satellites/${noradId}`),
   getAnomalies: (regionId?: string) =>
     request<Anomaly[]>(`/anomalies${regionId ? `?region_id=${regionId}` : ''}`),
   getEvents: (regionId?: string) =>

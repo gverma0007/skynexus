@@ -15,6 +15,8 @@ interface GlobeProps {
   onSelectRegion: (id: string | null) => void;
   /** Categories to render; empty set hides the layer. Undefined = all. */
   visibleSatCategories?: Set<string>;
+  selectedSatNorad?: number | null;
+  onSelectSatellite: (noradId: number | null) => void;
 }
 
 const R = 1; // globe radius
@@ -279,6 +281,8 @@ export const Globe: React.FC<GlobeProps> = ({
   selectedRegionId,
   onSelectRegion,
   visibleSatCategories,
+  selectedSatNorad,
+  onSelectSatellite,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
 
@@ -299,6 +303,10 @@ export const Globe: React.FC<GlobeProps> = ({
   useEffect(() => {
     dataRef.current = { regions, flights, satellites, events, selectedRegionId };
   }, [regions, flights, satellites, events, selectedRegionId]);
+  const selectedSatRef = useRef(selectedSatNorad);
+  useEffect(() => {
+    selectedSatRef.current = selectedSatNorad;
+  }, [selectedSatNorad]);
 
   /* ---------------- one-time scene bootstrap ---------------- */
   useEffect(() => {
@@ -410,7 +418,7 @@ export const Globe: React.FC<GlobeProps> = ({
       if (sat && (!region || sat.distance <= region.distance)) {
         const name = (sat.object.userData.satName as string) ?? 'Satellite';
         const cat = (sat.object.userData.category as string) ?? 'other';
-        text = `<b>${name}</b><br/><span style="color:#94a3b8">${cat}</span>`;
+        text = `<b>${name}</b><br/><span style="color:#94a3b8">${cat} · click for details</span>`;
       } else if (region) {
         const id = region.object.userData.regionId as string;
         const r = dataRef.current.regions.find((x) => x.id === id);
@@ -443,8 +451,15 @@ export const Globe: React.FC<GlobeProps> = ({
       raycaster.setFromCamera(pointer, camera);
       const satHits = raycaster.intersectObjects(satsGroup.children, false);
       const regionHits = raycaster.intersectObjects(regionMarkers.children, false);
-      // Satellites win ties; regions select on click.
-      if (regionHits.length > 0 && (satHits.length === 0 || regionHits[0].distance < satHits[0].distance)) {
+      // Satellites win ties: open the satellite detail card.
+      if (satHits.length > 0 && (regionHits.length === 0 || satHits[0].distance <= regionHits[0].distance)) {
+        const norad = satHits[0].object.userData.noradId as number | undefined;
+        if (norad != null) {
+          onSelectSatellite(norad === selectedSatRef.current ? null : norad);
+        }
+        return;
+      }
+      if (regionHits.length > 0) {
         const id = regionHits[0].object.userData.regionId as string;
         onSelectRegion(id === dataRef.current.selectedRegionId ? null : id);
       }
@@ -621,7 +636,7 @@ export const Globe: React.FC<GlobeProps> = ({
         new THREE.MeshBasicMaterial({ color })
       );
       marker.position.copy(pos);
-      marker.userData = { satName: sat.name, category: cat };
+      marker.userData = { satName: sat.name, category: cat, noradId: sat.norad_id };
       satsGroup.add(marker);
 
       if (!dense) {
