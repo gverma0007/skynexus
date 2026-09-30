@@ -15,6 +15,7 @@ import json
 import logging
 import math
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -44,20 +45,20 @@ CACHE_DIR.mkdir(exist_ok=True)
 # Celestrak group catalogs -> how many to track from each, mapped to the
 # satellite's functional category so the globe can group/filter by mission.
 SATELLITE_GROUPS: dict[str, tuple[int, str]] = {
-    "stations": (20, "station"),
-    "weather": (20, "weather"),
-    "science": (20, "science"),
-    "gps-ops": (15, "nav"),
-    "galileo": (15, "nav"),
-    "glo-ops": (15, "nav"),
-    "planet": (30, "earthobs"),
-    "spire": (25, "earthobs"),
-    "starlink": (40, "comms"),
-    "oneweb": (20, "comms"),
+    "stations": (22, "station"),
+    "weather": (40, "weather"),
+    "science": (40, "science"),
+    "gps-ops": (31, "nav"),
+    "galileo": (30, "nav"),
+    "glo-ops": (27, "nav"),
+    "planet": (60, "earthobs"),
+    "spire": (50, "earthobs"),
+    "starlink": (100, "comms"),
+    "oneweb": (30, "comms"),
     "iridium-NEXT": (15, "comms"),
-    "globalstar": (15, "comms"),
+    "globalstar": (28, "comms"),
     "orbcomm": (14, "comms"),
-    "sarsat": (20, "science"),
+    "sarsat": (40, "science"),
 }
 
 CATEGORY_LABELS: dict[str, str] = {
@@ -79,32 +80,47 @@ REGION_QUERY_POINTS: dict[str, list[tuple[float, float]]] = {
         (25.0, 47.5), (25.2, 55.3), (29.2, 47.9),
         (21.5, 39.2),   # Jeddah
         (32.0, 34.9),   # Tel Aviv
+        (33.3, 44.4),   # Baghdad
+        (35.7, 51.4),   # Tehran
+        (40.4, 49.9),   # Baku
     ],
     "Eastern Europe": [
         (50.0, 32.5), (52.1, 20.9), (44.4, 26.1),
         (47.4, 19.3),   # Budapest
         (50.4, 30.5),   # Kyiv
+        (54.7, 25.3),   # Vilnius
+        (46.0, 21.9),   # Timisoara
+        (59.4, 24.8),   # Tallinn
     ],
     "South China Sea": [
         (12.5, 112.5), (1.36, 103.99), (22.3, 113.9),
         (14.5, 121.0),  # Manila
         (13.7, 100.5),  # Bangkok
+        (3.1, 101.7),   # Kuala Lumpur
+        (-6.2, 106.8),  # Jakarta
+        (10.8, 106.7),  # Ho Chi Minh
     ],
     "North Atlantic": [
         (45.0, -25.0), (51.47, -0.45), (63.98, -22.6),
         (40.64, -73.78),  # New York
         (38.7, -9.1),     # Lisbon
+        (46.2, -60.2),    # Sydney NS
+        (53.3, -6.2),     # Dublin
+        (36.1, -5.3),     # Gibraltar
     ],
     "Pacific": [
         (0.0, -170.0), (21.3, -157.9), (35.77, 140.39),
         (-33.94, 151.18),  # Sydney
         (37.5, 126.9),     # Seoul
+        (1.35, 103.82),    # Changi East
+        (19.4, -99.1),     # Mexico City
+        (43.6, -79.6),     # Toronto
     ],
 }
 
 # ADS-B search radius (nm) and per-region aircraft cap.
 ADSB_RADIUS_NM = 400
-ADSB_MAX_PER_REGION = 40
+ADSB_MAX_PER_REGION = 60
 
 # Nearest major airport per region — ADS-B gives positions, not routes, so
 # live observations are attached to routes from these hubs.
@@ -169,6 +185,7 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
                 continue
 
             # Probe several points per region, dedup by aircraft hex.
+            # Small stagger between requests keeps the free API friendly.
             aircraft_by_hex: dict[str, dict] = {}
             primary = points[0]
             for lat, lon in points:
@@ -181,6 +198,7 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
                             hex_id = (ac.get("hex") or "").strip()
                             if hex_id:
                                 aircraft_by_hex[hex_id] = ac
+                    time.sleep(0.3)
                 except Exception as exc:
                     logger.warning("adsb.lol point %s failed: %s", (lat, lon), exc)
 
