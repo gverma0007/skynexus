@@ -1,59 +1,89 @@
+"""Plain-language assessment for What-Changed reports.
+
+Claude receives only the computed metrics (never raw rows). Without an API
+key, or if the call fails, a deterministic template writes the text. Every
+output ends with the causation disclaimer.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+
 import httpx
 
 from app.core.config import get_settings
 
-settings = get_settings()
-
-SYSTEM_PROMPT = """
-You are an expert analyst for SkyNexus. You are provided with statistical metrics
-regarding regional activity (aviation, satellite, weather, events).
-Analyze these metrics to provide a concise, plain-language explanation of
-observed anomalies.
-Hard Rule: Correlation does not establish causation.
-"""
+logger = logging.getLogger("ai_explainer")
 
 DISCLAIMER = "Correlation does not establish causation."
 
+SYSTEM_PROMPT = """You write short situation assessments for SkyNexus, a dashboard that
+compares a region's recent activity with the period just before it.
 
-def _local_explanation(metrics: dict) -> str:
-    """Deterministic offline analysis used when no ANTHROPIC_API_KEY is set."""
-    aviation = metrics.get("aviation_metrics", {})
-    weather = metrics.get("weather_metrics", {})
-    events = metrics.get("events_metrics", {})
-    satellite = metrics.get("satellite_metrics", {})
-    region = metrics.get("region", {}).get("name", "the region")
+You receive computed metrics only: aircraft per hour, earthquake counts and
+magnitudes, storm intensity, satellite passes and a 0-100 disruption index.
 
-    drivers = []
-    if abs(aviation.get("delta_pct", 0)) >= 10:
-        direction = "increase" if aviation["delta_pct"] > 0 else "decrease"
-        drivers.append(f"a {aviation['delta_pct']:+.1f}% {direction} in flight activity")
-    if abs(weather.get("delta_pct", 0)) >= 10 and weather.get("after", 0) > 20:
-        drivers.append("elevated storm activity")
-    if events.get("after", 0) > events.get("before", 0):
-        drivers.append("more reported security events")
-    if events.get("after", 0) == 0 and events.get("before", 0) == 0:
-        drivers.append("no significant event reporting")
+Rules:
+- 3 to 4 sentences of plain English for a non-specialist. No headings, no lists.
+- Lead with the biggest change. Use the numbers you are given; never invent any.
+- If storm intensity is high and air traffic fell, say weather may explain it.
+- Never claim or imply a cause, motive, military or hostile activity.
+- Do not add a disclaimer; the application adds one."""
 
-    if not drivers:
-        return (
-            f"Conditions over {region} remained broadly stable across the compared "
-            f"windows, with no metric shifting beyond 10%. {DISCLAIMER}"
+
+def _fmt_pct(v: float | None) -> str:
+    return "n/a" if v is None else f"{v:+.0f}%"
+
+
+def template_explanation(m: dict) -> str:
+    region = m["region"]["name"]
+    hours = m["window_hours"]
+    av, ev, wx = m["aviation_metrics"], m["events_metrics"], m["weather_metrics"]
+    parts: list[str] = []
+
+    if av["before"] is None or av["after"] is None:
+        parts.append(f"There is not enough air-traffic data yet to compare the last {hours} hours over {region}.")
+    elif av["delta_pct"] is not None and abs(av["delta_pct"]) >= 10:
+        word = "rose" if av["delta_pct"] > 0 else "fell"
+        parts.append(
+            f"Air traffic over {region} {word} {abs(av['delta_pct']):.0f}% in the last {hours} hours, "
+            f"from {av['before']:.1f} to {av['after']:.1f} aircraft per hour."
         )
-    return (
-        f"The observed changes over {region} align with {' and '.join(drivers)}. "
-        f"Flight counts moved from {aviation.get('before', 0)} to "
-        f"{aviation.get('after', 0)} per day, and satellite passes registered "
-        f"{satellite.get('before', 0)} -> {satellite.get('after', 0)} observations. "
-        f"{DISCLAIMER}"
-    )
+    else:
+        parts.append(
+            f"Air traffic over {region} held steady at about {av['after']:.1f} aircraft per hour "
+            f"({_fmt_pct(av['delta_pct'])} on the previous {hours} hours)."
+        )
+
+    if ev["after"] > 0:
+        largest = ev.get("largest")
+        tail = f", the largest {largest}" if largest else ""
+        parts.append(f"{ev['after']} earthquake{'s were' if ev['after'] != 1 else ' was'} recorded "
+                     f"(previously {ev['before']}){tail}.")
+    elif ev["before"] > 0:
+        parts.append(f"No earthquakes were recorded, down from {ev['before']} in the period before.")
+
+    if wx["after"] is not None:
+        if wx["after"] >= 40:
+            parts.append(f"Storm intensity was high at {wx['after']:.0f}/100.")
+            if av["delta_pct"] is not None and av["delta_pct"] <= -10:
+                parts.append("The weather may explain the lower traffic.")
+        else:
+            parts.append(f"Storm intensity stayed low ({wx['after']:.0f}/100), so weather is unlikely "
+                         f"to explain changes in traffic.")
+    return " ".join(parts)
 
 
-async def get_ai_explanation(metrics: dict) -> str:
+async def get_ai_explanation(metrics: dict) -> tuple[str, str]:
+    """Return (text, source) where source is 'claude' or 'template'."""
+    settings = get_settings()
     if not settings.ANTHROPIC_API_KEY:
-        return _local_explanation(metrics)
+        return f"{template_explanation(metrics)} {DISCLAIMER}", "template"
+    payload = {k: v for k, v in metrics.items() if k != "overall_assessment"}
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            res = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
                     "x-api-key": settings.ANTHROPIC_API_KEY,
@@ -61,17 +91,19 @@ async def get_ai_explanation(metrics: dict) -> str:
                     "content-type": "application/json",
                 },
                 json={
-                    "model": "claude-3-5-sonnet-20240620",
-                    "max_tokens": 1024,
+                    "model": settings.ANTHROPIC_MODEL,
+                    "max_tokens": 400,
                     "system": SYSTEM_PROMPT,
-                    "messages": [
-                        {"role": "user", "content": f"Analyze these metrics: {metrics}"}
-                    ],
+                    "messages": [{
+                        "role": "user",
+                        "content": "Metrics (JSON):\n" + json.dumps(payload, default=str),
+                    }],
                 },
-                timeout=10.0,
             )
-            response.raise_for_status()
-            data = response.json()
-            return data["content"][0]["text"]
-    except Exception:
-        return _local_explanation(metrics)
+            res.raise_for_status()
+            text = "".join(b.get("text", "") for b in res.json().get("content", [])).strip()
+            if text:
+                return f"{text} {DISCLAIMER}", "claude"
+    except Exception as exc:
+        logger.warning("Claude call failed, using template: %s", exc)
+    return f"{template_explanation(metrics)} {DISCLAIMER}", "template"

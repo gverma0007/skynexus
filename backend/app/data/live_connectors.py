@@ -13,14 +13,13 @@ scheduler keeps running.
 
 import json
 import logging
-import math
-import os
+
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
-from sqlalchemy import func, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal
@@ -70,9 +69,6 @@ CATEGORY_LABELS: dict[str, str] = {
     "comms": "Communications",
 }
 
-# Legacy list kept for TLE cache naming of the old five.
-TRACKED_SATELLITES = [25544, 48274, 43205, 29155, 37849]
-
 # Regions likely to have live traffic; used for the adsb point queries.
 # Multiple probe points per region widen coverage of each search circle.
 REGION_QUERY_POINTS: dict[str, list[tuple[float, float]]] = {
@@ -120,18 +116,17 @@ REGION_QUERY_POINTS: dict[str, list[tuple[float, float]]] = {
         (36.1, -5.3),     # Gibraltar
     ],
     "Pacific": [
-        (0.0, -170.0), (21.3, -157.9), (35.77, 140.39),
-        (-33.94, 151.18),  # Sydney
-        (37.5, 126.9),     # Seoul
-        (1.35, 103.82),    # Changi East
-        (19.4, -99.1),     # Mexico City
-        (43.6, -79.6),     # Toronto
+        (21.3, -157.9),   # Honolulu
+        (19.7, -155.1),   # Hilo
+        (8.0, -165.0),    # zone centre
+        (1.9, -157.4),    # Kiritimati
+        (-13.8, -171.8),  # Apia
     ],
 }
 
 # ADS-B search radius (nm) and per-region aircraft cap.
 ADSB_RADIUS_NM = 400
-ADSB_MAX_PER_REGION = 60
+ADSB_MAX_PER_REGION = 250
 
 # Nearest major airport per region — ADS-B gives positions, not routes, so
 # live observations are attached to routes from these hubs.
@@ -199,94 +194,69 @@ def _point_to_wkt(lon: float, lat: float) -> str:
 
 # ---------------------------------------------------------------- flights --
 def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -> int:
-    """Pull live ADS-B positions per region and store the fastest climbers."""
-    total = 0
+    """Pull live ADS-B positions and attach each aircraft to the region it is
+    actually inside (probe circles overlap and extend past zone borders)."""
+    from app.services.geo import region_for, region_shapes
+
+    shapes = region_shapes(db)
+    routes = {}
+    for region in db.query(Region).all():
+        route = _route_for(db, region)
+        if route is not None:
+            routes[str(region.id)] = route
+
+    aircraft_by_hex: dict[str, dict] = {}
     client = httpx.Client(timeout=20, headers=UA)
     try:
-        for region in db.query(Region).all():
-            points = REGION_QUERY_POINTS.get(region.name)
-            if not points:
-                continue
-            route = _route_for(db, region)
-            if route is None:
-                continue
-
-            # Probe several points per region, dedup by aircraft hex.
-            # Small stagger between requests keeps the free API friendly.
-            aircraft_by_hex: dict[str, dict] = {}
-            primary = points[0]
+        for region_name, points in REGION_QUERY_POINTS.items():
             for lat, lon in points:
                 try:
-                    res = client.get(
-                        f"https://api.adsb.lol/v2/point/{lat}/{lon}/{ADSB_RADIUS_NM}"
-                    )
+                    res = client.get(f"https://api.adsb.lol/v2/point/{lat}/{lon}/{ADSB_RADIUS_NM}")
                     if res.status_code == 200:
                         for ac in res.json().get("ac", []) or []:
                             hex_id = (ac.get("hex") or "").strip()
-                            if hex_id:
+                            if hex_id and "lat" in ac and "lon" in ac:
                                 aircraft_by_hex[hex_id] = ac
-                    time.sleep(0.3)
+                    else:
+                        logger.warning("adsb.lol %s -> HTTP %s", region_name, res.status_code)
+                    time.sleep(0.3)  # stay friendly to the free API
                 except Exception as exc:
                     logger.warning("adsb.lol point %s failed: %s", (lat, lon), exc)
-
-            # Fallback: military traffic feed (global, always on)
-            if not aircraft_by_hex:
-                try:
-                    lat, lon = primary
-                    res = client.get("https://api.adsb.lol/v2/mil")
-                    if res.status_code == 200:
-                        aircraft_by_hex = {
-                            (ac.get("hex") or "").strip(): ac
-                            for ac in (res.json().get("ac", []) or [])
-                            if _haversine_km(
-                                lat, lon, float(ac.get("lat", 0)), float(ac.get("lon", 0))
-                            )
-                            < 1500
-                        }
-                except Exception as exc:
-                    logger.warning("adsb.lol mil failed: %s", exc)
-
-            now = datetime.now(timezone.utc)
-            for ac in list(aircraft_by_hex.values())[:max_per_region]:
-                try:
-                    db.add(
-                        FlightObservation(
-                            route_id=route.id,
-                            callsign=(ac.get("flight") or ac.get("r") or "UNKNOWN").strip()[:64],
-                            icao24=(ac.get("hex") or "000000").strip()[:64],
-                            timestamp=now,
-                            position=_point_to_wkt(float(ac["lon"]), float(ac["lat"])),
-                            altitude_ft=int(ac.get("alt_baro", 30000))
-                            if isinstance(ac.get("alt_baro"), int)
-                            else 30000,
-                            speed_kt=float(ac.get("gs", 0)) or 450.0,
-                            heading_deg=float(ac.get("track", 0)) or 0.0,
-                            source="adsb.lol",
-                        )
-                    )
-                    total += 1
-                except (KeyError, ValueError, TypeError):
-                    continue
-            db.commit()
     finally:
         client.close()
+
+    now = datetime.now(timezone.utc)
+    per_region: dict[str, int] = {}
+    total = 0
+    for hex_id, ac in aircraft_by_hex.items():
+        try:
+            lat, lon = float(ac["lat"]), float(ac["lon"])
+        except (TypeError, ValueError):
+            continue
+        reg = region_for(shapes, lat, lon)
+        if reg is None or reg["id"] not in routes:
+            continue
+        if per_region.get(reg["id"], 0) >= max_per_region:
+            continue
+        alt = ac.get("alt_baro")
+        db.add(FlightObservation(
+            route_id=routes[reg["id"]].id,
+            callsign=(ac.get("flight") or ac.get("r") or "UNKNOWN").strip()[:64] or "UNKNOWN",
+            icao24=hex_id[:64],
+            timestamp=now,
+            position=_point_to_wkt(lon, lat),
+            altitude_ft=int(alt) if isinstance(alt, (int, float)) else 0,  # "ground" -> 0
+            speed_kt=float(ac.get("gs") or 0.0),
+            heading_deg=float(ac.get("track") or 0.0),
+            source="adsb.lol",
+        ))
+        per_region[reg["id"]] = per_region.get(reg["id"], 0) + 1
+        total += 1
+    db.commit()
     return total
 
 
-def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    r = 6371.0
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = p2 - p1
-    dl = math.radians(lon2 - lon1)
-    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * r * math.asin(math.sqrt(a))
-
-
 # ------------------------------------------------------------- satellites --
-def _tle_cache_path(norad: int) -> Path:
-    return CACHE_DIR / f"tle_{norad}.txt"
-
-
 def _fetch_group_tles(
     max_per_group: dict[str, tuple[int, str]]
 ) -> list[tuple[str, int, str, str, str]]:
@@ -341,44 +311,12 @@ def _fetch_group_tles(
     return combined
 
 
-def _gmst_deg(dt: datetime) -> float:
-    """Greenwich mean sidereal time (approx, degrees)."""
-    jd = (
-        dt.timetuple().tm_yday
-        + dt.hour / 24
-        + dt.minute / 1440
-        + dt.second / 86400
-    )
-    year = dt.year
-    # JD at 0h UT (Fliegel-Van Flandern, adequate for a prototype)
-    a = year // 100
-    b = 2 - a + a // 4
-    jd0 = (
-        math.floor(365.25 * (year + 4716))
-        + math.floor(30.6001 * 1)
-        + 2
-        + b
-        - 41845.0
-        + 1720994.5
-    )
-    d = jd0 + jd - 2451545.0
-    return (280.46061837 + 360.98564736629 * d) % 360
-
-
 def propagate_tle(tle_line1: str, tle_line2: str, when: datetime) -> tuple[float, float, float]:
-    """SGP4 -> sub-satellite (lat, lon, alt_km)."""
-    from sgp4.api import Satrec, jday
+    """SGP4 -> sub-satellite (lat, lon, alt_km), with a correct GMST rotation."""
+    from app.services.orbits import propagate
 
-    sat = Satrec.twoline2rv(tle_line1, tle_line2)
-    jd, fr = jday(when.year, when.month, when.day, when.hour, when.minute, when.second)
-    error, position_km, _ = sat.sgp4(jd, fr)
-    if error != 0:
-        raise ValueError(f"SGP4 error {error}")
-    r = math.sqrt(sum(c * c for c in position_km))
-    lat = math.degrees(math.asin(position_km[2] / r))
-    ra = math.degrees(math.atan2(position_km[1], position_km[0]))
-    lon = (ra - _gmst_deg(when) + 180) % 360 - 180
-    return lat, lon, r - 6371.0
+    lat, lon, alt, _ = propagate(tle_line1, tle_line2, when)
+    return lat, lon, alt
 
 
 def fetch_satellite_positions(db: Session, steps: int = 6, step_minutes: int = 10) -> int:
@@ -404,10 +342,18 @@ def fetch_satellite_positions(db: Session, steps: int = 6, step_minutes: int = 1
             sat.tle_line1, sat.tle_line2 = l1, l2
 
         try:
-            satrec = Satrec.twoline2rv(l1, l2)
+            Satrec.twoline2rv(l1, l2)  # validate before storing positions
         except Exception as exc:
             logger.warning("Bad TLE for %s: %s", name, exc)
             continue
+
+        # Replace the previous forecast window so the table stays bounded:
+        # each cycle rewrites now..now+steps*step_minutes, while older rows
+        # survive as track history until retention prune.
+        db.query(SatelliteObservation).filter(
+            SatelliteObservation.satellite_id == sat.id,
+            SatelliteObservation.timestamp >= now - timedelta(minutes=step_minutes),
+        ).delete(synchronize_session=False)
 
         # Spacecraft in view now + near-future ground track steps
         for step in range(steps):
@@ -422,7 +368,7 @@ def fetch_satellite_positions(db: Session, steps: int = 6, step_minutes: int = 1
                     timestamp=when,
                     position=f"POINTZ({lon} {lat} {alt})",
                     altitude_km=alt,
-                    source=f"celestrak:{satrec.satnum}"[:50],
+                    source="celestrak",
                 )
             )
             total += 1
@@ -506,42 +452,11 @@ USGS_FEEDS = {
 
 
 def _quake_region(db: Session, lat: float, lon: float) -> Region | None:
-    """Point-in-polygon match, else nearest region centroid within 4000 km."""
-    row = db.execute(
-        text(
-            """
-            SELECT id FROM regions r
-            WHERE ST_Contains(r.geom, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326))
-            LIMIT 1
-            """
-        ),
-        {"lon": lon, "lat": lat},
-    ).first()
-    if row:
-        return db.get(Region, row[0])
+    """Region whose polygon contains the epicentre (smallest zone wins)."""
+    from app.services.geo import region_for, region_shapes
 
-    nearest = (
-        db.query(Region)
-        .order_by(
-            func.ST_Distance(
-                Region.centroid,
-                func.ST_SetSRID(func.ST_MakePoint(lon, lat), 4326),
-            )
-        )
-        .first()
-    )
-    if nearest is None:
-        return None
-    dist_m = db.scalar(
-        func.ST_Distance(
-            nearest.centroid,
-            func.ST_SetSRID(func.ST_MakePoint(lon, lat), 4326),
-        )
-    )
-    # centroids stored in degrees (4326): ~111km per degree
-    if dist_m is not None and dist_m * 111.0 <= 4000:
-        return nearest
-    return None
+    reg = region_for(region_shapes(db), lat, lon)
+    return db.get(Region, reg["id"]) if reg else None
 
 
 def fetch_live_events(db: Session) -> int:
@@ -600,36 +515,22 @@ def fetch_live_events(db: Session) -> int:
 
 
 # -------------------------------------------------------------- entrypoint --
-def prune_old_observations(days: int = 7) -> int:
+def prune_old_observations(days: int | None = None) -> int:
     """Delete observations older than the retention window."""
+    from app.core.config import get_settings
+
+    days = int(days or get_settings().RETENTION_DAYS)
     db = SessionLocal()
     try:
-        result = db.execute(
-            text(
-                """
-                DELETE FROM flight_observations
-                WHERE timestamp < NOW() - INTERVAL ':days days'
-                """.replace(":days", str(days))
-            )
-        )
-        db.execute(
-            text(
-                """
-                DELETE FROM satellite_observations
-                WHERE timestamp < NOW() - INTERVAL ':days days'
-                """.replace(":days", str(days))
-            )
-        )
-        db.execute(
-            text(
-                """
-                DELETE FROM weather_observations
-                WHERE timestamp < NOW() - INTERVAL ':days days'
-                """.replace(":days", str(days))
-            )
-        )
+        removed = 0
+        for table, col in (("flight_observations", "timestamp"), ("satellite_observations", "timestamp"),
+                           ("weather_observations", "timestamp")):
+            res = db.execute(text(
+                f"DELETE FROM {table} WHERE {col} < NOW() - make_interval(days => :d)"
+            ), {"d": days})
+            removed += res.rowcount or 0
         db.commit()
-        return result.rowcount or 0
+        return removed
     finally:
         db.close()
 
@@ -638,11 +539,20 @@ def run_live_ingestion(steps: int = 6) -> dict:
     """Run every connector once. Returns per-source counts."""
     db = SessionLocal()
     summary: dict[str, int] = {}
+    steps_map = (
+        ("flights", lambda: fetch_live_flights(db)),
+        ("satellite_obs", lambda: fetch_satellite_positions(db, steps=steps)),
+        ("weather", lambda: fetch_live_weather(db)),
+        ("events", lambda: fetch_live_events(db)),
+    )
     try:
-        summary["flights"] = fetch_live_flights(db)
-        summary["satellite_obs"] = fetch_satellite_positions(db, steps=steps)
-        summary["weather"] = fetch_live_weather(db)
-        summary["events"] = fetch_live_events(db)
+        for name, fn in steps_map:
+            try:
+                summary[name] = fn()
+            except Exception as exc:  # one failing source must not stop the others
+                db.rollback()
+                logger.warning("%s connector failed: %s", name, exc)
+                summary[name] = -1
     finally:
         db.close()
     try:
@@ -658,5 +568,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run one live ingestion cycle")
     parser.add_argument("--steps", type=int, default=6, help="satellite forecast steps")
     args = parser.parse_args()
-    result = run_live_ingestion(steps=args.steps)
+    from app.services.ingest import run_cycle
+
+    result = run_cycle(steps=args.steps)
     print("Live ingestion summary:", json.dumps(result, indent=2))

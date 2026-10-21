@@ -12,7 +12,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from geoalchemy2 import Geometry
-from sqlalchemy.orm import relationship, foreign
+from sqlalchemy.orm import relationship
 
 from app.core.db import Base
 
@@ -230,7 +230,9 @@ class WhatChangedReport(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     region_id = Column(UUID(as_uuid=True), nullable=False)
-    event_id = Column(UUID(as_uuid=True), nullable=False)
+    event_id = Column(UUID(as_uuid=True), nullable=True)
+    window_hours = Column(Integer, nullable=False, server_default="24")
+    ai_source = Column(String(20), nullable=False, server_default="template")
     before_start = Column(DateTime(timezone=True), nullable=False)
     before_end = Column(DateTime(timezone=True), nullable=False)
     after_start = Column(DateTime(timezone=True), nullable=False)

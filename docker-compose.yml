@@ -1,20 +1,23 @@
+# SkyNexus: docker compose up --build   then open http://localhost:5173
+#
+# Settings come from .env (copy .env.example). Defaults run the live feeds.
 services:
   db:
     image: postgis/postgis:16-3.4
     restart: unless-stopped
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: skynexus
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d skynexus"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
 
   backend:
     build: ./backend
@@ -22,14 +25,21 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "8000:8000"
     environment:
       DATABASE_URL: postgresql://user:password@db:5432/skynexus
-      ENV: development
-      # Set to 0 to disable the automatic live-data ingestion loop
-      LIVE_INGEST: 1
-      LIVE_INGEST_INTERVAL_S: 600
+      ENV: ${ENV:-production}
+      DATA_MODE: ${DATA_MODE:-live}
+      DEMO_RESET: ${DEMO_RESET:-0}
+      LIVE_INGEST: ${LIVE_INGEST:-1}
+      LIVE_INGEST_INTERVAL_S: ${LIVE_INGEST_INTERVAL_S:-600}
+      RETENTION_DAYS: ${RETENTION_DAYS:-8}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+      SEVERITY_LOW: ${SEVERITY_LOW:-20}
+      SEVERITY_MEDIUM: ${SEVERITY_MEDIUM:-40}
+      SEVERITY_HIGH: ${SEVERITY_HIGH:-70}
+    ports:
+      - "${API_PORT:-8000}:8000"
 
   frontend:
     build: ./frontend
@@ -37,7 +47,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "5173:5173"
+      - "${WEB_PORT:-5173}:80"
 
 volumes:
   postgres_data:

@@ -1,56 +1,45 @@
-from datetime import timedelta
-
-from fastapi import APIRouter, Depends
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
 from app.core.db import get_db
-from app.models.aviation import Event, Region
-from geoalchemy2 import functions as geo_func
+from app.services.series import magnitude_of
 
 router = APIRouter()
 
 
 @router.get("")
-def get_events(
+def list_events(
     region_id: UUID | None = None,
-    limit: int = 50,
+    days: int = Query(7, ge=1, le=30),
+    min_magnitude: float = Query(0.0, ge=0, le=10),
+    limit: int = Query(200, le=1000),
     db: Session = Depends(get_db),
 ):
-    """Recent events with coordinates for the globe + timeline."""
-    cutoff = func.now() - timedelta(days=14)
-    query = db.query(Event, Region.name).join(Region, Event.region_id == Region.id)
-
+    """Recent events (USGS earthquakes in live mode), newest first."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    sql = """
+        SELECT e.id::text, e.external_id, e.event_date, e.event_type, e.category, e.severity,
+               e.description, r.id::text, r.name, ST_Y(e.position), ST_X(e.position), e.source
+        FROM events e JOIN regions r ON r.id = e.region_id
+        WHERE e.event_date >= :since {region}
+        ORDER BY e.event_date DESC LIMIT :limit
+    """.format(region="AND e.region_id = :rid" if region_id else "")
+    params = {"since": since, "limit": limit}
     if region_id:
-        query = query.filter(Event.region_id == region_id)
-
-    rows = (
-        query.filter(Event.event_date >= cutoff)
-        .order_by(Event.event_date.desc())
-        .limit(limit)
-        .all()
-    )
-    events = []
-    for event, region_name in rows:
-        wkt = db.scalar(geo_func.ST_AsText(event.position))
-        try:
-            parts = wkt.replace("POINT(", "").replace(")", "").split()
-            lon, lat = float(parts[0]), float(parts[1])
-        except (ValueError, IndexError, AttributeError):
-            lon, lat = 0.0, 0.0
-        events.append(
-            {
-                "id": str(event.id),
-                "external_id": event.external_id,
-                "event_date": event.event_date.isoformat(),
-                "event_type": event.event_type,
-                "category": event.category,
-                "severity": event.severity,
-                "description": event.description,
-                "region_name": region_name,
-                "lat": lat,
-                "lon": lon,
-            }
-        )
-    return events
+        params["rid"] = str(region_id)
+    out = []
+    for r in db.execute(text(sql), params).all():
+        mag = magnitude_of(r[6], r[5])
+        if mag < min_magnitude:
+            continue
+        out.append({
+            "id": r[0], "external_id": r[1], "event_date": r[2].isoformat(), "event_type": r[3],
+            "category": r[4], "severity": r[5], "description": r[6], "region_id": r[7],
+            "region_name": r[8], "lat": float(r[9]), "lon": float(r[10]), "source": r[11],
+            "magnitude": mag,
+        })
+    return out

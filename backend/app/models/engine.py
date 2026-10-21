@@ -5,13 +5,11 @@ from sqlalchemy import (
     String,
     Float,
     DateTime,
-    Text,
     func,
     Index,
     ForeignKey,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import UUID
 
 from app.core.db import Base
 

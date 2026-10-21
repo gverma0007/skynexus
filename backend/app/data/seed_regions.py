@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from app.core.db import SessionLocal, engine
+from app.core.db import SessionLocal
 from app.models.aviation import Region
 from shapely.geometry import Polygon
 from geoalchemy2.shape import from_shape
@@ -34,11 +34,14 @@ REGIONS = [
         "centroid": (45.0, -25.0)
     },
     {
+        # Central Pacific, east of the dateline (includes Hawaii). Kept within
+        # -180..-150 so the polygon never wraps the antimeridian: a 160..-160
+        # box in EPSG:4326 is read as 320 degrees wide and swallows the tropics.
         "name": "Pacific",
         "polygon": [
-            (10.0, 160.0), (10.0, -160.0), (-10.0, -160.0), (-10.0, 160.0), (10.0, 160.0)
+            (25.0, -180.0), (25.0, -150.0), (-10.0, -150.0), (-10.0, -180.0), (25.0, -180.0)
         ],
-        "centroid": (0.0, 180.0)
+        "centroid": (8.0, -165.0)
     },
     # --- Extended strategic monitoring zones ---
     {
@@ -120,10 +123,7 @@ def upsert_regions():
         inserted = 0
         updated = 0
         for r_data in REGIONS:
-            # Create polygon and point geometries
-            poly = Polygon(r_data["polygon"])
-            # GeoAlchemy2 expects (lon, lat) for WKT/WKB, but our tuples are (lat, lon)
-            # Let's swap them for shapely
+            # Tuples are (lat, lon); WKT/shapely want (lon, lat).
             poly_swapped = Polygon([(lon, lat) for lat, lon in r_data["polygon"]])
             
             # Centroid is (lat, lon) -> (lon, lat)

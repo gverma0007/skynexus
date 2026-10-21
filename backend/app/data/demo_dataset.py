@@ -1,411 +1,279 @@
-"""Generate a geo-realistic SkyNexus demo dataset.
+"""Generate an offline 8-day demo world for SkyNexus.
 
-Creates real airports per region, plausible great-circle routes, staged
-flight observations that animate along those routes, varied weather
-(storms in some regions), security events in hotspots and satellites
-with inclined ground tracks. Everything is positioned where it should
-be on the globe so the dashboard looks alive.
+Everything the live connectors would produce, but synthetic and
+reproducible (seeded):
+
+- Hourly aircraft snapshots for all 15 regions with a day/night rhythm by
+  local time, plus four scripted scenarios in the last hours:
+    Red Sea              traffic surge (+60%, last 8 h) and M6.1 + M5.8 quakes
+    Taiwan Strait        sharp traffic drop (-45%, last 6 h), the pattern of
+                         an airspace restriction, with moderate quakes
+    Eastern Mediterranean storm building to ~60 and traffic dipping 20%
+                         (the weather-explained case)
+    Korean Peninsula     mild surge (+18%) and an M4.2 quake
+- Hourly weather per region, background earthquakes in quake-prone zones.
+- ~180 satellites with valid TLEs (realistic constellations), propagated
+  with the same SGP4 code as live mode.
+
+Rows are tagged source="demo_dataset". Run:
+    python -m app.data.demo_dataset --reset
 """
+
+from __future__ import annotations
 
 import argparse
 import logging
 import math
 import random
 from datetime import datetime, timedelta, timezone
-from uuid import UUID
 
-from geoalchemy2.shape import to_shape
+from psycopg2.extras import execute_values
 from sqlalchemy import text
-from sqlalchemy.orm import Session
 
-from app.core.db import SessionLocal
+from app.core.db import engine
+from app.data.seed_airports import upsert_airports
 from app.data.seed_regions import REGIONS, upsert_regions
-from app.models.aviation import (
-    Airport,
-    Event,
-    FlightObservation,
-    FlightRoute,
-    Region,
-    Satellite,
-    SatelliteObservation,
-    WeatherObservation,
-)
+from app.services.orbits import make_tle, propagate
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger("demo_dataset")
 
-random.seed(42)
+HOURS = 8 * 24
+SRC = "demo_dataset"
 
-# Per-region scenario knobs: storm level, event pressure, traffic weight.
-SCENARIO = {
-    "Middle East": {"storm": 65.0, "events": 3, "traffic": 3},
-    "Eastern Europe": {"storm": 10.0, "events": 1, "traffic": 2},
-    "South China Sea": {"storm": 35.0, "events": 2, "traffic": 2},
-    "North Atlantic": {"storm": 20.0, "events": 0, "traffic": 3},
-    "Pacific": {"storm": 5.0, "events": 0, "traffic": 1},
+# Mean aircraft per hour at the daily peak, base storm level, quake activity.
+PROFILE = {
+    "Middle East": (120, 8, 0.10), "Eastern Europe": (85, 10, 0.02),
+    "South China Sea": (105, 18, 0.15), "North Atlantic": (130, 22, 0.03),
+    "Pacific": (22, 12, 0.20), "Black Sea": (40, 12, 0.05), "Red Sea": (45, 9, 0.06),
+    "Taiwan Strait": (70, 14, 0.35), "Korean Peninsula": (85, 10, 0.15),
+    "Eastern Mediterranean": (55, 14, 0.18), "Baltic Sea": (50, 16, 0.01),
+    "Horn of Africa": (20, 8, 0.05), "Bay of Bengal": (45, 20, 0.04),
+    "Caribbean": (60, 15, 0.12), "Gulf of Guinea": (30, 12, 0.01),
 }
 
-# Plausible hub airports: (iata, name, lat, lon) per region name.
-AIRPORTS = {
-    "Middle East": [
-        ("DXB", "Dubai Intl", 25.2532, 55.3657),
-        ("DOH", "Hamad Intl", 25.2731, 51.6081),
-        ("RUH", "King Khalid Intl", 24.9576, 46.6988),
-    ],
-    "Eastern Europe": [
-        ("WAW", "Warsaw Chopin", 52.1657, 20.9671),
-        ("OTP", "Bucharest Henri Coanda", 44.5711, 26.0850),
-        ("BUD", "Budapest Ferenc Liszt", 47.4369, 19.2556),
-    ],
-    "South China Sea": [
-        ("SIN", "Singapore Changi", 1.3644, 103.9915),
-        ("HKG", "Hong Kong Intl", 22.3080, 113.9185),
-        ("MNL", "Manila Ninoy Aquino", 14.5086, 121.0198),
-    ],
-    "North Atlantic": [
-        ("JFK", "New York JFK", 40.6413, -73.7781),
-        ("LHR", "London Heathrow", 51.4700, -0.4543),
-        ("KEF", "Keflavik Intl", 63.9850, -22.6056),
-    ],
-    "Pacific": [
-        ("HNL", "Honolulu Daniel K. Inouye", 21.3187, -157.9224),
-        ("NRT", "Tokyo Narita", 35.7719, 140.3929),
-        ("SYD", "Sydney Kingsford Smith", -33.9399, 151.1753),
-    ],
+# (region, hours_back_start, multiplier) applied to traffic for the latest hours
+TRAFFIC_SCENARIOS = {
+    "Red Sea": (8, 1.6),
+    "Taiwan Strait": (6, 0.55),
+    "Eastern Mediterranean": (12, 0.80),
+    "Korean Peninsula": (6, 1.18),
+}
+STORM_SCENARIOS = {"Eastern Mediterranean": (12, 60.0)}
+SCRIPTED_QUAKES = [
+    ("Red Sea", 1.5, 6.1, "110 km NE of Massawa, Eritrea", 16.4, 40.2),
+    ("Red Sea", 3.2, 5.8, "62 km W of Jizan, Saudi Arabia", 16.95, 42.0),
+    ("Red Sea", 9.0, 4.6, "southern Red Sea", 15.6, 41.2),
+    ("Red Sea", 15.0, 4.1, "central Red Sea", 19.8, 38.9),
+    ("Taiwan Strait", 5.0, 4.9, "31 km E of Hualien City, Taiwan", 23.98, 121.9),
+    ("Taiwan Strait", 20.0, 4.3, "Taiwan Strait", 24.2, 119.6),
+    ("Korean Peninsula", 7.0, 4.2, "Sea of Japan, 80 km E of Pohang", 36.0, 130.3),
+]
+QUAKE_PLACES = {
+    "Taiwan Strait": (23.8, 121.6), "Korean Peninsula": (35.9, 129.6),
+    "Eastern Mediterranean": (35.2, 26.5), "Pacific": (19.4, -155.3),
+    "Caribbean": (18.3, -66.9), "South China Sea": (13.5, 119.8),
+    "Black Sea": (40.9, 30.8), "Middle East": (27.5, 54.0), "Red Sea": (17.5, 40.8),
+    "Horn of Africa": (11.6, 43.1), "Bay of Bengal": (20.5, 92.5),
 }
 
-EVENT_TEMPLATES = [
-    ("Airspace Restriction", "Security", "High", "Emergency airspace restriction (NOTAM) issued"),
-    ("Military Exercise", "Military", "Medium", "Live-fire exercise area active — overflights rerouted"),
-    ("GPS Jamming Report", "Cyber", "Medium", "Multiple GNSS interference reports from civil aviation"),
-    ("Airport Closure", "Infrastructure", "High", "Runway closed for emergency repairs"),
-    ("Diplomatic Tension", "Political", "Low", "Border tensions elevate regional risk assessment"),
+# (name prefix, category, count, inclination, mean motion rev/day, ecc, first NORAD)
+CONSTELLATIONS = [
+    ("ISS (ZARYA)", "station", 1, 51.64, 15.50, 0.0004, 25544),
+    ("CSS (TIANHE)", "station", 1, 41.47, 15.60, 0.0005, 48274),
+    ("NOAA", "weather", 4, 98.9, 14.13, 0.0012, 33591),
+    ("METOP", "weather", 3, 98.7, 14.21, 0.0002, 38771),
+    ("GOES", "weather", 2, 0.05, 1.0027, 0.0001, 51850),
+    ("HUBBLE SPACE TELESCOPE", "science", 1, 28.47, 15.14, 0.0002, 20580),
+    ("SWIFT", "science", 1, 20.56, 15.25, 0.0009, 28485),
+    ("SARSAT", "science", 6, 98.6, 14.2, 0.0011, 40069),
+    ("GPS BIIF", "nav", 12, 55.0, 2.0057, 0.009, 39166),
+    ("GALILEO", "nav", 10, 56.0, 1.7048, 0.0003, 49809),
+    ("FLOCK 4X", "earthobs", 30, 97.5, 15.22, 0.0008, 56170),
+    ("SENTINEL", "earthobs", 6, 98.6, 14.31, 0.0001, 40697),
+    ("STARLINK", "comms", 70, 53.05, 15.06, 0.0001, 57900),
+    ("ONEWEB", "comms", 20, 87.9, 13.16, 0.0002, 51080),
+    ("IRIDIUM", "comms", 12, 86.4, 14.34, 0.0002, 56720),
 ]
 
-SATELLITES = [
-    (25544, "ISS (ZARYA)", 51.6),
-    (48274, "STARLINK-1130", 53.0),
-    (43205, "SENTINEL-6A", 66.0),
-    (29155, "NOAA-19", 99.0),
-    (37849, "TERRA", 98.2),
-]
+
+def _bbox(polygon):
+    lats = [p[0] for p in polygon]
+    lons = [p[1] for p in polygon]
+    return min(lats), max(lats), min(lons), max(lons)
 
 
-def lat_lon_to_wkt(lat: float, lon: float) -> str:
-    return f"POINT({lon} {lat})"
-
-
-def jitter_point(lat: float, lon: float, spread_deg: float) -> tuple[float, float]:
-    return (
-        max(-85.0, min(85.0, lat + random.uniform(-spread_deg, spread_deg))),
-        (lon + random.uniform(-spread_deg, spread_deg) + 180) % 360 - 180,
-    )
-
-
-def great_circle_point(
-    lat1: float, lon1: float, lat2: float, lon2: float, f: float
-) -> tuple[float, float]:
-    """Interpolate along the great circle between two points."""
-    phi1, lam1, phi2, lam2 = map(math.radians, (lat1, lon1, lat2, lon2))
-    d = (
-        2
-        * math.asin(
-            math.sqrt(
-                math.sin((phi2 - phi1) / 2) ** 2
-                + math.cos(phi1) * math.cos(phi2) * math.sin((lam2 - lam1) / 2) ** 2
-            )
-        )
-    )
-    if d == 0:
-        return lat1, lon1
-    a = math.sin((1 - f) * d) / math.sin(d)
-    b = math.sin(f * d) / math.sin(d)
-    x = a * math.cos(phi1) * math.cos(lam1) + b * math.cos(phi2) * math.cos(lam2)
-    y = a * math.cos(phi1) * math.sin(lam1) + b * math.cos(phi2) * math.sin(lam2)
-    z = a * math.sin(phi1) + b * math.sin(phi2)
-    return math.degrees(math.atan2(z, math.hypot(x, y))), math.degrees(math.atan2(y, x))
+def _diurnal(hour_utc: int, lon: float) -> float:
+    local = (hour_utc + lon / 15.0) % 24
+    # quiet ~03:00 local, busy ~14:00 local
+    return 0.55 + 0.45 * max(0.0, math.sin((local - 5.0) / 24.0 * 2 * math.pi)) ** 0.8
 
 
 def reset_database():
-    logger.info("Clearing demo data (schema is managed by alembic)...")
-    db = SessionLocal()
+    logger.info("Clearing observation data (schema and regions are kept)...")
+    with engine.begin() as conn:
+        conn.execute(text(
+            "TRUNCATE flight_observations, weather_observations, satellite_observations, events, "
+            "satellites, anomaly_scores, event_correlations, disruption_index, forecasts, "
+            "what_changed_reports RESTART IDENTITY CASCADE"
+        ))
+
+
+def _route_per_region(conn) -> dict[str, str]:
+    rows = conn.execute(text(
+        "SELECT DISTINCT ON (r.name) r.name, fr.id::text FROM flight_routes fr "
+        "JOIN regions r ON r.id = fr.region_id ORDER BY r.name, fr.id"
+    )).all()
+    return {name: rid for name, rid in rows}
+
+
+def generate(rng: random.Random) -> dict:
+    now = datetime.now(timezone.utc)
+    current_hour = now.replace(minute=0, second=0, microsecond=0)
+    hours = [current_hour - timedelta(hours=h) for h in range(HOURS - 1, -1, -1)]
+    counts = {"flights": 0, "weather": 0, "events": 0, "satellites": 0, "satellite_obs": 0}
+
+    raw = engine.raw_connection()
     try:
-        db.execute(
-            text(
-                """
-                TRUNCATE flight_observations, flight_routes, weather_observations,
-                         satellite_observations, events, airports, satellites,
-                         disruption_index, forecasts, what_changed_reports
-                RESTART IDENTITY CASCADE
-                """
-            )
-        )
-        db.commit()
-        logger.info("Data tables cleared.")
+        with engine.connect() as conn:
+            routes = _route_per_region(conn)
+            region_ids = dict(conn.execute(text("SELECT name, id::text FROM regions")).all())
+        cur = raw.cursor()
+        flights, weather, events = [], [], []
+
+        for reg in REGIONS:
+            name = reg["name"]
+            if name not in routes:
+                continue
+            peak, storm_base, quake_rate = PROFILE.get(name, (40, 12, 0.05))
+            lat0, lat1, lon0, lon1 = _bbox(reg["polygon"])
+            clat, clon = reg["centroid"]
+            storm = storm_base
+            for idx, h in enumerate(hours):
+                hours_back = HOURS - 1 - idx
+                is_current = idx == len(hours) - 1
+                rate = peak * _diurnal(h.hour, clon) * rng.gauss(1.0, 0.06)
+                sc = TRAFFIC_SCENARIOS.get(name)
+                if sc and hours_back < sc[0]:
+                    ramp = min(1.0, (sc[0] - hours_back) / 2.0)
+                    rate *= 1 + (sc[1] - 1) * ramp
+                if is_current:
+                    rate *= max(0.15, now.minute / 60.0)  # partial hour
+                n = max(0, int(round(rate)))
+                ts = now - timedelta(minutes=2) if is_current else h + timedelta(minutes=rng.randint(5, 55))
+                for _ in range(n):
+                    lat = rng.uniform(lat0, lat1)
+                    lon = rng.uniform(lon0, lon1)
+                    flights.append((
+                        routes[name], f"{rng.choice(['UAE', 'QTR', 'SIA', 'BAW', 'DLH', 'THY', 'KAL', 'EVA', 'ETH', 'AAL'])}{rng.randint(10, 9999)}",
+                        f"{rng.randint(0, 0xFFFFFF):06x}", ts, f"POINT({lon:.4f} {lat:.4f})",
+                        rng.choice([0, 3000]) if rng.random() < 0.05 else rng.randint(24000, 41000),
+                        rng.uniform(380, 520), rng.uniform(0, 360), SRC,
+                    ))
+
+                # weather: mean-reverting random walk + storm scenario
+                storm += (storm_base - storm) * 0.15 + rng.gauss(0, 3.0)
+                s_val = storm
+                ss = STORM_SCENARIOS.get(name)
+                if ss and hours_back < ss[0]:
+                    s_val = storm + (ss[1] - storm) * min(1.0, (ss[0] - hours_back) / 8.0)
+                s_val = max(0.0, min(100.0, s_val))
+                weather.append((region_ids[name], h + timedelta(minutes=10), f"POINT({clon} {clat})",
+                                max(0.0, 8 + s_val * 0.4 + rng.gauss(0, 2)),
+                                max(0.0, s_val / 12 + rng.gauss(0, 0.5)), round(s_val, 1), SRC))
+
+                # background quakes (Gutenberg-Richter-ish magnitudes)
+                if not is_current and rng.random() < quake_rate / 4:
+                    qlat, qlon = QUAKE_PLACES.get(name, (clat, clon))
+                    mag = min(5.4, 2.5 + rng.expovariate(2.3))
+                    events.append(_quake(region_ids[name], h + timedelta(minutes=rng.randint(0, 59)),
+                                         mag, f"near {name}", qlat + rng.gauss(0, 0.6),
+                                         qlon + rng.gauss(0, 0.6), rng))
+
+        for name, hours_ago, mag, place, lat, lon in SCRIPTED_QUAKES:
+            events.append(_quake(region_ids[name], now - timedelta(hours=hours_ago), mag, place, lat, lon, rng))
+
+        logger.info("Inserting %d aircraft positions...", len(flights))
+        execute_values(cur, """
+            INSERT INTO flight_observations (id, route_id, callsign, icao24, timestamp, position,
+                altitude_ft, speed_kt, heading_deg, source, ingested_at)
+            VALUES %s""", flights,
+            template="(gen_random_uuid(), %s::uuid, %s, %s, %s, ST_GeomFromText(%s, 4326), %s, %s, %s, %s, now())",
+            page_size=5000)
+        execute_values(cur, """
+            INSERT INTO weather_observations (id, region_id, timestamp, position, wind_speed_kt,
+                precipitation_mm, storm_index, source, ingested_at) VALUES %s""", weather,
+            template="(gen_random_uuid(), %s::uuid, %s, ST_GeomFromText(%s, 4326), %s, %s, %s, %s, now())")
+        execute_values(cur, """
+            INSERT INTO events (id, external_id, event_date, event_type, category, severity, position,
+                region_id, description, source, ingested_at) VALUES %s""", events,
+            template="(gen_random_uuid(), %s, %s, %s, %s, %s, ST_GeomFromText(%s, 4326), %s::uuid, %s, %s, now())")
+        counts["flights"], counts["weather"], counts["events"] = len(flights), len(weather), len(events)
+
+        # satellites
+        sat_rows, obs_rows = [], []
+        for prefix, category, n, inc, mm, ecc, first in CONSTELLATIONS:
+            planes = max(1, min(n, 6))
+            for k in range(n):
+                norad = first + k
+                label = prefix if n == 1 else f"{prefix}-{k + 1:02d}" if prefix not in ("STARLINK", "ONEWEB") \
+                    else f"{prefix}-{norad % 10000:04d}"
+                raan = (360.0 / planes) * (k % planes) + rng.uniform(-3, 3)
+                ma = (360.0 / max(1, n // planes)) * (k // planes) + rng.uniform(0, 30)
+                l1, l2 = make_tle(norad, inc, raan, ecc, rng.uniform(0, 360), ma, mm, now)
+                sat_rows.append((norad, label, category, l1, l2))
+        execute_values(cur, "INSERT INTO satellites (id, norad_id, name, category, tle_line1, tle_line2) VALUES %s",
+                       sat_rows, template="(gen_random_uuid(), %s, %s, %s, %s, %s)")
+        raw.commit()
+        cur.execute("SELECT norad_id, id::text FROM satellites")
+        sat_ids = dict(cur.fetchall())
+        step = timedelta(minutes=30)
+        t = now - timedelta(days=6)
+        times = []
+        while t <= now + timedelta(minutes=60):
+            times.append(t)
+            t += step
+        for norad, _, _, l1, l2 in sat_rows:
+            for when in times:
+                try:
+                    lat, lon, alt, _ = propagate(l1, l2, when)
+                except ValueError:
+                    continue
+                obs_rows.append((sat_ids[norad], when, f"POINTZ({lon:.4f} {lat:.4f} {alt:.1f})", alt, SRC))
+        execute_values(cur, """
+            INSERT INTO satellite_observations (id, satellite_id, timestamp, position, altitude_km, source,
+                ingested_at) VALUES %s""", obs_rows,
+            template="(gen_random_uuid(), %s::uuid, %s, ST_GeomFromText(%s, 4326), %s, %s, now())",
+            page_size=5000)
+        raw.commit()
+        counts["satellites"], counts["satellite_obs"] = len(sat_rows), len(obs_rows)
     finally:
-        db.close()
+        raw.close()
+    return counts
 
 
-def seed_airports_and_routes(db: Session) -> dict[str, list[Airport]]:
-    logger.info("Seeding airports and routes...")
-    region_map = {r.name: r for r in db.query(Region).all()}
-    region_airports: dict[str, list[Airport]] = {}
-
-    for region_name, hubs in AIRPORTS.items():
-        region = region_map.get(region_name)
-        if region is None:
-            continue
-        airports = []
-        for iata, name, lat, lon in hubs:
-            airport = (
-                db.query(Airport).filter(Airport.iata_code == iata).first()
-            )
-            if airport is None:
-                airport = Airport(
-                    iata_code=iata,
-                    name=name,
-                    geom=lat_lon_to_wkt(lat, lon),
-                    region_id=region.id,
-                )
-                db.add(airport)
-            airports.append(airport)
-        region_airports[region_name] = airports
-    db.commit()
-    return region_airports
-
-
-def generate_flights(db: Session, region_airports: dict[str, list[Airport]]):
-    logger.info("Generating flight routes and observations...")
-    now = datetime.now(timezone.utc)
-
-    for region_name, airports in region_airports.items():
-        region = db.query(Region).filter(Region.name == region_name).first()
-        if region is None or len(airports) < 2:
-            continue
-        scenario = SCENARIO.get(region_name, {"traffic": 1})
-
-        # hub routes: first airport to each other airport
-        for dest in airports[1:]:
-            route = FlightRoute(
-                origin_airport_id=airports[0].id,
-                dest_airport_id=dest.id,
-                region_id=region.id,
-            )
-            db.add(route)
-            db.flush()
-
-            o = db.get(Airport, route.origin_airport_id)
-            d = db.get(Airport, route.dest_airport_id)
-            n_flights = scenario["traffic"]
-            for i in range(n_flights):
-                progress = random.uniform(0.15, 0.85)
-                t0 = now - timedelta(hours=6) + timedelta(minutes=15 * i)
-                for step in range(8):
-                    p = min(1.0, progress + step * 0.02)
-                    lat_s, lon_s = great_circle_point(
-                        _airport_lat(o), _airport_lon(o), _airport_lat(d), _airport_lon(d), p
-                    )
-                    db.add(
-                        FlightObservation(
-                            route_id=route.id,
-                            callsign=f"SKY{random.randint(100,999)}",
-                            icao24=f"{random.randint(0, 0xFFFFFF):06X}",
-                            timestamp=t0 + timedelta(minutes=5 * step),
-                            position=lat_lon_to_wkt(lat_s, lon_s),
-                            altitude_ft=random.randint(30000, 41000),
-                            speed_kt=random.uniform(430, 510),
-                            heading_deg=random.uniform(0, 360),
-                            source="demo_dataset",
-                        )
-                    )
-        db.commit()
-
-    # Backfill a 7-day low-volume baseline so anomaly scoring has signal,
-    # concentrating extra flights in the last 24h in "high traffic" regions.
-    for region_name, airports in region_airports.items():
-        region = db.query(Region).filter(Region.name == region_name).first()
-        routes = (
-            db.query(FlightRoute).filter(FlightRoute.region_id == region.id).all()
-            if region
-            else []
-        )
-        if not routes:
-            continue
-        for day in range(7, 0, -1):
-            for route in routes:
-                o = db.get(Airport, route.origin_airport_id)
-                d = db.get(Airport, route.dest_airport_id)
-                for _ in range(2):
-                    lat, lon = great_circle_point(
-                        _airport_lat(o), _airport_lon(o), _airport_lat(d), _airport_lon(d),
-                        random.uniform(0.1, 0.9),
-                    )
-                    db.add(
-                        FlightObservation(
-                            route_id=route.id,
-                            callsign=f"SKY{random.randint(100,999)}",
-                            icao24=f"{random.randint(0, 0xFFFFFF):06X}",
-                            timestamp=now - timedelta(days=day, hours=random.randint(0, 20)),
-                            position=lat_lon_to_wkt(lat, lon),
-                            altitude_ft=random.randint(30000, 41000),
-                            speed_kt=random.uniform(430, 510),
-                            heading_deg=random.uniform(0, 360),
-                            source="demo_dataset",
-                        )
-                    )
-    db.commit()
-
-
-def _airport_lat(airport: Airport) -> float:
-    return float(to_shape(airport.geom).y)
-
-
-def _airport_lon(airport: Airport) -> float:
-    return float(to_shape(airport.geom).x)
-
-
-def generate_weather(db: Session):
-    logger.info("Generating weather observations...")
-    now = datetime.now(timezone.utc)
-    regions = db.query(Region).all()
-    for region in regions:
-        storm = SCENARIO.get(region.name, {"storm": 10.0})["storm"]
-        centroid_wkt = db.execute(
-            text("SELECT ST_AsText(centroid) FROM regions WHERE id = :id"),
-            {"id": str(region.id)},
-        ).scalar()
-        try:
-            lon_s, lat_s = (
-                centroid_wkt.replace("POINT(", "").replace(")", "").split()
-            )
-            base_lat, base_lon = float(lat_s), float(lon_s)
-        except (ValueError, AttributeError):
-            base_lat, base_lon = 0.0, 0.0
-
-        for day in range(8):
-            for _ in range(6):
-                lat, lon = jitter_point(base_lat, base_lon, 6.0)
-                ts = now - timedelta(days=day, hours=random.randint(0, 12))
-                # Recent hours in stormy regions get a rising storm index so
-                # the what-changed comparison shows a weather escalation.
-                boost = 1.0 if day > 0 else random.uniform(1.0, 1.6)
-                db.add(
-                    WeatherObservation(
-                        region_id=region.id,
-                        timestamp=ts,
-                        position=lat_lon_to_wkt(lat, lon),
-                        wind_speed_kt=max(
-                            0.0, random.gauss(12 + storm * 0.25, 4)
-                        ),
-                        precipitation_mm=max(
-                            0.0, random.gauss(storm * 0.3, 2.0)
-                        ),
-                        storm_index=max(
-                            0.0, random.gauss(storm * boost, storm * 0.15 + 1)
-                        ),
-                        source="demo_dataset",
-                    )
-                )
-    db.commit()
-
-
-def generate_events(db: Session):
-    logger.info("Generating events...")
-    now = datetime.now(timezone.utc)
-    regions = db.query(Region).all()
-    for region in regions:
-        count = SCENARIO.get(region.name, {"events": 0})["events"]
-        centroid_wkt = db.execute(
-            text("SELECT ST_AsText(centroid) FROM regions WHERE id = :id"),
-            {"id": str(region.id)},
-        ).scalar()
-        try:
-            lon_s, lat_s = centroid_wkt.replace("POINT(", "").replace(")", "").split()
-            base_lat, base_lon = float(lat_s), float(lon_s)
-        except (ValueError, AttributeError):
-            base_lat, base_lon = 0.0, 0.0
-
-        for i in range(count):
-            etype, category, severity, description = random.choice(EVENT_TEMPLATES)
-            lat, lon = jitter_point(base_lat, base_lon, 5.0)
-            db.add(
-                Event(
-                    external_id=f"DEMO-{region.name[:3].upper()}-{i:02d}",
-                    event_date=now - timedelta(hours=random.randint(2, 30)),
-                    event_type=etype,
-                    category=category,
-                    severity=severity,
-                    position=lat_lon_to_wkt(lat, lon),
-                    region_id=region.id,
-                    description=description,
-                    source="demo_dataset",
-                )
-            )
-    db.commit()
-
-
-def generate_satellites(db: Session):
-    logger.info("Generating satellites and ground tracks...")
-    now = datetime.now(timezone.utc)
-    for norad, name, inclination in SATELLITES:
-        sat = db.query(Satellite).filter(Satellite.norad_id == norad).first()
-        if sat is None:
-            sat = Satellite(
-                norad_id=norad,
-                name=name,
-                tle_line1=f"1 {norad}U 58002B   26273.51782528  .00016717  00000-0  10270-3 0  9993",
-                tle_line2=f"2 {norad}  {inclination:8.4f} 143.7260 852874.3649 13.56868233 295.49316902 15.54240726284500",
-            )
-            db.add(sat)
-            db.flush()
-
-        altitude_km = 420.0 if norad == 25544 else random.uniform(500, 850)
-        for step in range(24):
-            t = now + timedelta(minutes=4 * step)
-            lat = inclination * math.sin(math.radians(step * 15))
-            lon = ((step * 15) * 1.5 - 180) % 360 - 180
-            db.add(
-                SatelliteObservation(
-                    satellite_id=sat.id,
-                    timestamp=t,
-                    position=f"POINTZ({lon} {lat} {altitude_km})",
-                    altitude_km=altitude_km + random.uniform(-2, 2),
-                    source="demo_dataset",
-                )
-            )
-    db.commit()
+def _quake(region_id, when, mag, place, lat, lon, rng):
+    sev = "High" if mag >= 5.5 else "Medium" if mag >= 4.0 else "Low"
+    return (f"demo-{rng.randint(0, 10**9)}", when, "Earthquake", "Natural Hazard", sev,
+            f"POINT({lon:.3f} {lat:.3f})", region_id, f"M{mag:.1f} earthquake — {place}", SRC)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate SkyNexus demo dataset")
-    parser.add_argument("--reset", action="store_true", help="Clear existing data first")
-    parser.add_argument("--seed-regions", action="store_true", help="Also (re)seed regions")
+    parser = argparse.ArgumentParser(description="Generate the SkyNexus demo dataset")
+    parser.add_argument("--reset", action="store_true", help="Clear existing observations first")
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
+    upsert_regions()
+    upsert_airports()
     if args.reset:
         reset_database()
-    if args.seed_regions or args.reset:
-        upsert_regions()
+    counts = generate(random.Random(args.seed))
+    print("Demo dataset summary:", counts)
 
-    db = SessionLocal()
-    try:
-        region_airports = seed_airports_and_routes(db)
-        generate_flights(db, region_airports)
-        generate_weather(db)
-        generate_events(db)
-        generate_satellites(db)
+    from app.services.ingest import refresh_analysis
 
-        print("Demo dataset summary:")
-        print(f"  Airports:   {db.query(Airport).count()}")
-        print(f"  Routes:     {db.query(FlightRoute).count()}")
-        print(f"  Flights:    {db.query(FlightObservation).count()}")
-        print(f"  Satellites: {db.query(Satellite).count()}")
-        print(f"  Sat obs:    {db.query(SatelliteObservation).count()}")
-        print(f"  Weather:    {db.query(WeatherObservation).count()}")
-        print(f"  Events:     {db.query(Event).count()}")
-    finally:
-        db.close()
-    logger.info("Demo dataset generation complete.")
+    print("Anomalies flagged:", refresh_analysis())
 
 
 if __name__ == "__main__":

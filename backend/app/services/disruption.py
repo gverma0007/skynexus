@@ -1,129 +1,207 @@
-"""Region disruption scoring shared by API endpoints.
+"""Regional Disruption Index (0-100).
 
-Computes a 0-100 composite disruption score per region from:
-- flight volume vs its own 7-day baseline
-- recent security/event severity
-- weather storm intensity
+One score per region from three signals, each compared with that region's
+own recent normal:
+
+- Air traffic (40%): distinct aircraft per hour over the last 3 complete
+  hours vs the same hours of day across the prior 7 days. Both surges and
+  drops count (a drop is what an airspace closure looks like). Scored from
+  the z-score: |z| <= 1 is normal (0), |z| = 4 or more is 100.
+- Earthquakes / events (35%): magnitude-weighted points for the last 24 h,
+  decaying with a 12 h time constant, minus half the region's usual daily
+  background so quake-prone zones are not permanently flagged.
+- Storm intensity (25%): latest storm index (0-100) at the region centre.
+
+Bands (env-tunable): Calm < 20 <= Watch < 40 <= Elevated < 70 <= Critical.
 """
 
-from datetime import datetime, timedelta, timezone
-from sqlalchemy import func
-from sqlalchemy.orm import Session, aliased
+from __future__ import annotations
+
+import math
+import statistics
+from datetime import datetime, timedelta
+
+from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models.aviation import (
-    Airport,
-    Event,
-    FlightObservation,
-    FlightRoute,
-    Region,
-    WeatherObservation,
-)
+from app.services.series import RegionSeries, SeriesBundle, get_series
 
-_SEVERITY_WEIGHTS = {"high": 1.0, "medium": 0.6, "low": 0.3}
+WEIGHTS = {"flights": 0.40, "events": 0.35, "weather": 0.25}
+RECENT_HOURS = 3
+MIN_BASELINE_HOURS = 12
+
+STATUS = {"normal": "Calm", "low": "Watch", "medium": "Elevated", "high": "Critical"}
 
 
-def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
-    return max(low, min(high, value))
+def clamp(v: float, lo: float = 0.0, hi: float = 100.0) -> float:
+    return max(lo, min(hi, v))
 
 
-def _flight_anomaly_score(db: Session, region_id, now: datetime) -> float:
-    """Current 24h flight count vs the average daily count of the prior 7 days."""
-    route_region = aliased(FlightRoute)
-    current = (
-        db.query(func.count(FlightObservation.id))
-        .join(route_region, FlightObservation.route_id == route_region.id)
-        .filter(
-            route_region.region_id == region_id,
-            FlightObservation.timestamp >= now - timedelta(hours=24),
-        )
-        .scalar()
-    ) or 0
-
-    baseline_start = now - timedelta(days=8)
-    baseline_end = now - timedelta(days=1)
-    weekly_total = (
-        db.query(func.count(FlightObservation.id))
-        .join(route_region, FlightObservation.route_id == route_region.id)
-        .filter(
-            route_region.region_id == region_id,
-            FlightObservation.timestamp >= baseline_start,
-            FlightObservation.timestamp < baseline_end,
-        )
-        .scalar()
-    ) or 0
-    baseline = weekly_total / 7.0
-
-    if baseline <= 0:
-        return 60.0 if current > 0 else 0.0
-    ratio = current / baseline
-    return _clamp((ratio - 1.0) * 50.0)
-
-
-def _event_relevance_score(db: Session, region_id, now: datetime) -> float:
-    """Max event severity in the region over the last 24h, scaled to 0-100."""
-    latest = (
-        db.query(Event)
-        .filter(
-            Event.region_id == region_id,
-            Event.event_date >= now - timedelta(hours=24),
-        )
-        .all()
-    )
-    if not latest:
-        return 0.0
-    weight = max(
-        _SEVERITY_WEIGHTS.get((e.severity or "").lower(), 0.5) for e in latest
-    )
-    return _clamp(weight * 100.0)
-
-
-def _weather_score(db: Session, region_id, now: datetime) -> float:
-    avg_storm = (
-        db.query(func.avg(WeatherObservation.storm_index))
-        .filter(
-            WeatherObservation.region_id == region_id,
-            WeatherObservation.timestamp >= now - timedelta(hours=24),
-        )
-        .scalar()
-    )
-    return _clamp(float(avg_storm or 0.0))
-
-
-def _severity_label(score: float) -> str:
-    """Bands from Settings — tunable via SEVERITY_* env vars."""
+def severity_label(score: float) -> str:
     s = get_settings()
-    if score < s.severity_low:
-        return "normal"
-    if score < s.severity_medium:
-        return "low"
-    if score < s.severity_high:
+    if score >= s.severity_high:
+        return "high"
+    if score >= s.severity_medium:
         return "medium"
-    return "high"
+    if score >= s.severity_low:
+        return "low"
+    return "normal"
 
 
-def compute_region_disruption(db: Session, region: Region, now: datetime | None = None) -> dict:
-    """Composite disruption metrics for one region."""
-    now = now or datetime.now(timezone.utc)
-    flight_score = _flight_anomaly_score(db, region.id, now)
-    event_score = _event_relevance_score(db, region.id, now)
-    weather_score = _weather_score(db, region.id, now)
+# ------------------------------------------------------------- components --
+def flight_component(rs: RegionSeries, end_idx: int) -> dict:
+    """end_idx is the index of the current (partial) hour; it is excluded."""
+    recent_idx = [i for i in range(end_idx - RECENT_HOURS, end_idx)
+                  if i >= 0 and rs.aircraft[i] is not None]
+    base_idx = [i for i in range(0, max(0, end_idx - 24)) if rs.aircraft[i] is not None]
+    coverage_days = round(len(base_idx) / 24.0, 1)
+    if not recent_idx or len(base_idx) < MIN_BASELINE_HOURS:
+        recent = statistics.fmean(rs.aircraft[i] for i in recent_idx) if recent_idx else None
+        return {"score": 0.0, "warming_up": True, "recent": _r(recent), "expected": None,
+                "pct_change": None, "z": None, "direction": "flat",
+                "baseline_days": coverage_days}
 
-    composite = (
-        flight_score * 0.4 + event_score * 0.35 + weather_score * 0.25
-    )
+    all_base = [rs.aircraft[i] for i in base_idx]
+    expected_parts, std_parts = [], []
+    for i in recent_idx:
+        hod = rs.hours[i].hour
+        same = [rs.aircraft[j] for j in base_idx if rs.hours[j].hour == hod]
+        pool = same if len(same) >= 3 else all_base
+        expected_parts.append(statistics.fmean(pool))
+        std_parts.append(statistics.pstdev(pool) if len(pool) > 1 else 0.0)
+    recent = statistics.fmean(rs.aircraft[i] for i in recent_idx)
+    expected = statistics.fmean(expected_parts)
+    std = max(statistics.fmean(std_parts), 0.1 * expected, 1.0)
+    z = (recent - expected) / std
+    pct = (recent - expected) / expected * 100.0 if expected > 0 else None
+    score = clamp((abs(z) - 1.0) / 3.0 * 100.0)
+    return {"score": round(score, 1), "warming_up": False, "recent": _r(recent),
+            "expected": _r(expected), "pct_change": _r(pct), "z": _r(z, 2),
+            "direction": "up" if z > 0.5 else "down" if z < -0.5 else "flat",
+            "baseline_days": coverage_days}
+
+
+def event_points(mag: float) -> float:
+    if mag >= 6.0:
+        return 70.0
+    if mag >= 5.5:
+        return 55.0
+    if mag >= 5.0:
+        return 40.0
+    if mag >= 4.5:
+        return 25.0
+    if mag >= 4.0:
+        return 15.0
+    return 5.0
+
+
+def event_component(events: list[dict], at: datetime) -> dict:
+    """events: this region's events (any age within the 8-day window)."""
+    window = [e for e in events if at - timedelta(hours=24) <= e["event_date"] <= at]
+    points = sum(event_points(e["magnitude"]) *
+                 math.exp(-((at - e["event_date"]).total_seconds() / 3600.0) / 12.0)
+                 for e in window)
+    older = [e for e in events if at - timedelta(days=8) <= e["event_date"] < at - timedelta(hours=24)]
+    background = sum(event_points(e["magnitude"]) for e in older) / 7.0 * 0.5
+    score = clamp(points - 0.5 * background)
+    largest = max(window, key=lambda e: e["magnitude"], default=None)
     return {
-        "region_id": str(region.id),
-        "region_name": region.name,
-        "flight_anomaly_score": round(flight_score, 1),
-        "event_relevance_score": round(event_score, 1),
-        "weather_score": round(weather_score, 1),
-        "composite_index": round(composite, 1),
-        "severity_label": _severity_label(composite),
+        "score": round(score, 1),
+        "count_24h": len(window),
+        "max_magnitude": largest["magnitude"] if largest else None,
+        "largest": _event_brief(largest, at) if largest else None,
     }
 
 
-def compute_all_disruptions(db: Session) -> list[dict]:
-    regions = db.query(Region).all()
-    now = datetime.now(timezone.utc)
-    return [compute_region_disruption(db, r, now) for r in regions]
+def weather_component(rs: RegionSeries, end_idx: int) -> dict:
+    now_val = None
+    for i in range(end_idx, max(-1, end_idx - 7), -1):
+        if rs.storm[i] is not None:
+            now_val = rs.storm[i]
+            break
+    week = [v for v in rs.storm[: max(0, end_idx - 24)] if v is not None]
+    return {"score": round(clamp(now_val or 0.0), 1), "storm_now": _r(now_val),
+            "storm_week_avg": _r(statistics.fmean(week)) if week else None}
+
+
+# ---------------------------------------------------------------- combine --
+def score_region(rs: RegionSeries, events: list[dict], end_idx: int, at: datetime) -> dict:
+    f = flight_component(rs, end_idx)
+    e = event_component(events, at)
+    w = weather_component(rs, end_idx)
+    composite = (f["score"] * WEIGHTS["flights"] + e["score"] * WEIGHTS["events"]
+                 + w["score"] * WEIGHTS["weather"])
+    return {"composite": round(composite, 1), "flights": f, "events": e, "weather": w}
+
+
+def explain(name: str, s: dict) -> list[str]:
+    f, e, w = s["flights"], s["events"], s["weather"]
+    lines: list[str] = []
+    if f["warming_up"]:
+        lines.append(f"Air traffic baseline is still building ({f['baseline_days']} of 1+ days collected).")
+    elif f["pct_change"] is not None and abs(f["pct_change"]) >= 10 and f["score"] > 0:
+        word = "above" if f["pct_change"] > 0 else "below"
+        lines.append(f"Air traffic is {abs(f['pct_change']):.0f}% {word} its normal for this time of day.")
+    else:
+        lines.append("Air traffic is within its normal range for this time of day.")
+    if e["largest"]:
+        lines.append(f"{e['count_24h']} earthquake{'s' if e['count_24h'] != 1 else ''} in 24 h; "
+                     f"largest {e['largest']['label']}.")
+    if w["storm_now"] is not None and w["storm_now"] >= 40:
+        lines.append(f"Storm intensity is high ({w['storm_now']:.0f}/100).")
+    if f.get("direction") == "down" and (w["storm_now"] or 0) >= 40:
+        lines.append("Bad weather may explain the drop in air traffic.")
+    return lines
+
+
+def compute_all_disruptions(db: Session, bundle: SeriesBundle | None = None) -> list[dict]:
+    bundle = bundle or get_series(db)
+    end_idx = len(bundle.hours) - 1
+    by_region: dict[str, list[dict]] = {}
+    for ev in bundle.events:
+        by_region.setdefault(ev["region_id"], []).append(ev)
+
+    out = []
+    for rid, rs in bundle.regions.items():
+        evs = by_region.get(rid, [])
+        now_s = score_region(rs, evs, end_idx, bundle.now)
+        prev_s = (score_region(rs, evs, end_idx - 24, bundle.now - timedelta(hours=24))
+                  if end_idx >= 48 else None)
+        composite = now_s["composite"]
+        sev = severity_label(composite)
+        out.append({
+            "region_id": rid,
+            "region_name": rs.name,
+            "lat": rs.lat,
+            "lon": rs.lon,
+            "composite_index": composite,
+            "previous_index": prev_s["composite"] if prev_s else None,
+            "change_24h": round(composite - prev_s["composite"], 1) if prev_s else None,
+            "severity_label": sev,
+            "status": STATUS[sev],
+            "flight_anomaly_score": now_s["flights"]["score"],
+            "event_relevance_score": now_s["events"]["score"],
+            "weather_score": now_s["weather"]["score"],
+            "components": {"flights": now_s["flights"], "events": now_s["events"],
+                           "weather": now_s["weather"]},
+            "explanation": explain(rs.name, now_s),
+            "sparkline": _sparkline(rs, evs, end_idx),
+        })
+    out.sort(key=lambda d: d["composite_index"], reverse=True)
+    return out
+
+
+def _sparkline(rs: RegionSeries, evs: list[dict], end_idx: int) -> list[float | None]:  # noqa: ARG001
+    """Aircraft per hour for the last 24 complete hours (None = no data)."""
+    return [rs.aircraft[i] for i in range(max(0, end_idx - 24), end_idx)]
+
+
+def _event_brief(e: dict, at: datetime) -> dict:
+    age_h = (at - e["event_date"]).total_seconds() / 3600.0
+    return {"id": e["id"], "magnitude": e["magnitude"], "description": e["description"],
+            "event_date": e["event_date"].isoformat(), "hours_ago": round(max(age_h, 0), 1),
+            "label": (e["description"] or e["event_type"]).replace(" earthquake — ", ", ")}
+
+
+def _r(v: float | None, nd: int = 1) -> float | None:
+    return None if v is None else round(float(v), nd)
