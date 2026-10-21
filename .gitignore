@@ -13,7 +13,7 @@ dist/
 
 # Env & secrets
 .env
-.ai
+.ai/
 
 # Caches
 backend/app/data/.cache/
