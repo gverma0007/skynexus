@@ -317,7 +317,7 @@ export const api = {
   history: (id: string, hours = 48) => request<History>(`/regions/${id}/history${q({ hours })}`),
   overhead: (id: string) => request<Overhead>(`/regions/${id}/overhead`),
   forecast: (id: string) => request<Forecast>(`/regions/${id}/forecast`),
-  flights: () => request<Flight[]>('/flights/live'),
+  flights: (limit = 3000) => request<Flight[]>(`/flights/live${q({ limit })}`),
   satellites: () => request<Satellite[]>('/satellites/live'),
   satellite: (norad: number) => request<SatelliteDetail>(`/satellites/${norad}`),
   events: (p: { region_id?: string; days?: number; min_magnitude?: number } = {}) =>
@@ -326,6 +326,13 @@ export const api = {
   alerts: () => request<Alert[]>('/alerts'),
   search: (text: string) => request<SearchResult>(`/search${q({ q: text })}`),
   system: () => request<SystemHealth>('/system/health'),
+  getMode: () => request<{ data_mode: string }>('/system/mode'),
+  setMode: (mode: 'live' | 'demo') =>
+    request<{ data_mode: string; status: string }>('/system/mode', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    }),
   runIngest: () => request<{ status: string; state: IngestState }>('/ingest/live', { method: 'POST' }),
   reports: () => request<ReportSummary[]>('/reports'),
   report: (id: string) => request<Report>(`/reports/${id}`),

@@ -5,6 +5,13 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def normalize_db_url(url: str) -> str:
+    """Ensure PostgreSQL URL uses the psycopg2 driver."""
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    return url
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -41,10 +48,7 @@ class Settings(BaseSettings):
 
     @property
     def sqlalchemy_url(self) -> str:
-        url = self.DATABASE_URL
-        if url.startswith("postgresql://"):
-            url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
-        return url
+        return normalize_db_url(self.DATABASE_URL)
 
 
 @lru_cache()

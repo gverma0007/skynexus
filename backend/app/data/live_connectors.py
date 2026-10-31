@@ -23,6 +23,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal
+from app.services.geo import point_to_wkt
+from app.services.satellites import CATEGORY_LABELS
 from app.models.aviation import (
     Airport,
     Event,
@@ -37,52 +39,49 @@ from app.models.aviation import (
 logger = logging.getLogger("connectors")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
-UA = {"User-Agent": "SkyNexus-Prototype/1.0 (contact: demo@skynexus.local)"}
+UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"}
 CACHE_DIR = Path("/tmp/skynexus_cache")
 CACHE_DIR.mkdir(exist_ok=True)
 
 # Celestrak group catalogs -> how many to track from each, mapped to the
 # satellite's functional category so the globe can group/filter by mission.
 SATELLITE_GROUPS: dict[str, tuple[int, str]] = {
-    "stations": (22, "station"),
-    "weather": (40, "weather"),
-    "science": (40, "science"),
-    "gps-ops": (31, "nav"),
-    "galileo": (30, "nav"),
-    "glo-ops": (27, "nav"),
-    "planet": (60, "earthobs"),
-    "spire": (50, "earthobs"),
-    "starlink": (100, "comms"),
-    "oneweb": (30, "comms"),
-    "iridium-NEXT": (15, "comms"),
-    "globalstar": (28, "comms"),
-    "orbcomm": (14, "comms"),
-    "sarsat": (40, "science"),
-}
-
-CATEGORY_LABELS: dict[str, str] = {
-    "station": "Crewed station",
-    "weather": "Weather",
-    "science": "Science",
-    "nav": "Navigation",
-    "earthobs": "Earth observation",
-    "comms": "Communications",
+    "stations": (50, "station"),
+    "weather": (150, "weather"),
+    "science": (150, "science"),
+    "gps-ops": (40, "nav"),
+    "galileo": (40, "nav"),
+    "glo-ops": (40, "nav"),
+    "gnss": (100, "nav"),
+    "planet": (250, "earthobs"),
+    "spire": (180, "earthobs"),
+    "resource": (150, "earthobs"),
+    "geo": (400, "comms"),
+    "oneweb": (150, "comms"),
+    "iridium-NEXT": (80, "comms"),
+    "globalstar": (50, "comms"),
+    "orbcomm": (40, "comms"),
+    "ses": (60, "comms"),
+    "intelsat": (50, "comms"),
+    "amateur": (80, "comms"),
+    "cubesat": (80, "science"),
+    "visual": (100, "science"),
+    "sarsat": (60, "science"),
 }
 
 # Regions likely to have live traffic; used for the adsb point queries.
 # Multiple probe points per region widen coverage of each search circle.
 REGION_QUERY_POINTS: dict[str, list[tuple[float, float]]] = {
-    # Extended zones: single concentrated probe each
-    "Black Sea": [(44.0, 34.0)],
-    "Red Sea": [(20.0, 38.5)],
-    "Taiwan Strait": [(24.0, 120.0)],
-    "Korean Peninsula": [(38.0, 127.5)],
-    "Eastern Mediterranean": [(34.0, 30.0)],
-    "Baltic Sea": [(57.0, 20.0)],
-    "Horn of Africa": [(10.0, 46.0)],
-    "Bay of Bengal": [(13.0, 88.0)],
-    "Caribbean": [(18.0, -73.0)],
-    "Gulf of Guinea": [(3.0, 5.0)],
+    "Black Sea": [(44.0, 34.0), (42.0, 31.0), (43.5, 39.0)],
+    "Red Sea": [(20.0, 38.5), (26.0, 35.5), (14.0, 42.5)],
+    "Taiwan Strait": [(24.0, 120.0), (22.5, 120.5), (25.5, 121.5)],
+    "Korean Peninsula": [(38.0, 127.5), (35.5, 128.5), (37.5, 126.8)],
+    "Eastern Mediterranean": [(34.0, 30.0), (35.5, 34.0), (32.5, 34.5)],
+    "Baltic Sea": [(57.0, 20.0), (55.0, 16.0), (59.0, 21.0)],
+    "Horn of Africa": [(10.0, 46.0), (11.5, 43.0), (8.0, 48.0)],
+    "Bay of Bengal": [(13.0, 88.0), (17.5, 84.0), (10.0, 92.0)],
+    "Caribbean": [(18.0, -73.0), (14.0, -68.0), (22.0, -78.0)],
+    "Gulf of Guinea": [(3.0, 5.0), (5.5, 0.0), (2.0, 8.5)],
     "Middle East": [
         (25.0, 47.5), (25.2, 55.3), (29.2, 47.9),
         (21.5, 39.2),   # Jeddah
@@ -126,7 +125,7 @@ REGION_QUERY_POINTS: dict[str, list[tuple[float, float]]] = {
 
 # ADS-B search radius (nm) and per-region aircraft cap.
 ADSB_RADIUS_NM = 400
-ADSB_MAX_PER_REGION = 250
+ADSB_MAX_PER_REGION = 500
 
 # Nearest major airport per region — ADS-B gives positions, not routes, so
 # live observations are attached to routes from these hubs.
@@ -188,10 +187,6 @@ def _route_for(db: Session, region: Region) -> FlightRoute | None:
     return route
 
 
-def _point_to_wkt(lon: float, lat: float) -> str:
-    return f"POINT({lon} {lat})"
-
-
 # ---------------------------------------------------------------- flights --
 def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -> int:
     """Pull live ADS-B positions and attach each aircraft to the region it is
@@ -217,9 +212,12 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
                             hex_id = (ac.get("hex") or "").strip()
                             if hex_id and "lat" in ac and "lon" in ac:
                                 aircraft_by_hex[hex_id] = ac
+                    elif res.status_code == 429:
+                        logger.warning("adsb.lol %s -> HTTP 429, backing off", region_name)
+                        time.sleep(1.5)
                     else:
                         logger.warning("adsb.lol %s -> HTTP %s", region_name, res.status_code)
-                    time.sleep(0.3)  # stay friendly to the free API
+                    time.sleep(0.5)  # stay friendly to the free API
                 except Exception as exc:
                     logger.warning("adsb.lol point %s failed: %s", (lat, lon), exc)
     finally:
@@ -244,7 +242,7 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
             callsign=(ac.get("flight") or ac.get("r") or "UNKNOWN").strip()[:64] or "UNKNOWN",
             icao24=hex_id[:64],
             timestamp=now,
-            position=_point_to_wkt(lon, lat),
+            position=point_to_wkt(lon, lat),
             altitude_ft=int(alt) if isinstance(alt, (int, float)) else 0,  # "ground" -> 0
             speed_kt=float(ac.get("gs") or 0.0),
             heading_deg=float(ac.get("track") or 0.0),
@@ -421,7 +419,7 @@ def fetch_live_weather(db: Session) -> int:
                     WeatherObservation(
                         region_id=region.id,
                         timestamp=datetime.now(timezone.utc),
-                        position=_point_to_wkt(lon, lat),
+                        position=point_to_wkt(lon, lat),
                         wind_speed_kt=wind_kt,
                         precipitation_mm=precip,
                         storm_index=storm,
@@ -446,8 +444,9 @@ def _storm_index(wind_kmh: float, gust_kmh: float, precip_mm: float) -> float:
 
 # ----------------------------------------------------------------- events --
 USGS_FEEDS = {
-    "significant": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_day.geojson",
-    "M2.5+": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson",
+    "significant": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_month.geojson",
+    "M2.5_week": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_week.geojson",
+    "all_day": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
 }
 
 
@@ -500,7 +499,7 @@ def fetch_live_events(db: Session) -> int:
                         event_type="Earthquake",
                         category="Natural Hazard",
                         severity="High" if mag >= 5.5 else "Medium" if mag >= 4 else "Low",
-                        position=_point_to_wkt(lon, lat),
+                        position=point_to_wkt(lon, lat),
                         region_id=region.id,
                         description=f"M{mag:.1f} earthquake — {props.get('place', 'unknown location')}",
                         source="usgs",

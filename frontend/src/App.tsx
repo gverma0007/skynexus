@@ -84,6 +84,13 @@ export default function App() {
           ))}
         </nav>
         <div className="right">
+          <ModeSwitch
+            mode={stats.data?.data_mode ?? 'live'}
+            onSwitch={() => {
+              stats.refresh();
+              regions.refresh();
+            }}
+          />
           <button className="search" onClick={() => setSearchOpen(true)} aria-label="Search regions and satellites">
             <SearchIcon />
             <span className="search-text">Search regions or satellites</span>
@@ -99,6 +106,51 @@ export default function App() {
         SkyNexus measures statistical change in public data. Correlation does not establish causation.
       </footer>
       {searchOpen && <SearchPalette onClose={() => setSearchOpen(false)} />}
+    </div>
+  );
+}
+
+function ModeSwitch({ mode, onSwitch }: { mode: string; onSwitch: () => void }) {
+  const [switching, setSwitching] = useState(false);
+  const isDemo = mode === 'demo';
+
+  const handleToggle = async (targetMode: 'live' | 'demo') => {
+    if (targetMode === (isDemo ? 'demo' : 'live') || switching) return;
+    setSwitching(true);
+    try {
+      await api.setMode(targetMode);
+      onSwitch();
+      setTimeout(() => {
+        setSwitching(false);
+        window.location.reload();
+      }, 250);
+    } catch {
+      setSwitching(false);
+    }
+  };
+
+  return (
+    <div className="mode-switch" role="group" aria-label="Data source mode">
+      <button
+        type="button"
+        className={`mode-btn ${!isDemo ? 'active' : ''}`}
+        onClick={() => handleToggle('live')}
+        disabled={switching}
+        title="Switch to live real-time feeds"
+      >
+        <span className="dot live" />
+        Live
+      </button>
+      <button
+        type="button"
+        className={`mode-btn ${isDemo ? 'active' : ''}`}
+        onClick={() => handleToggle('demo')}
+        disabled={switching}
+        title="Switch to offline simulated demo dataset"
+      >
+        <span className="dot demo" />
+        Demo
+      </button>
     </div>
   );
 }

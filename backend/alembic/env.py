@@ -15,25 +15,15 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+from app.core.config import normalize_db_url
 from app.core.db import Base
+from app.models.aviation import Region, Airport
 
 # Prefer DATABASE_URL from the environment (docker-compose / .env),
 # falling back to the URL in alembic.ini. Force the psycopg2 driver,
 # which is the one installed in requirements.txt.
 _db_url = os.getenv("DATABASE_URL") or config.get_main_option("sqlalchemy.url")
-config.set_main_option(
-    "sqlalchemy.url", _db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
-)
-from app.models.aviation import Region, Airport
-
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
-config = context.config
-
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+config.set_main_option("sqlalchemy.url", normalize_db_url(_db_url))
 
 # add your model's MetaData object here
 # for 'autogenerate' support

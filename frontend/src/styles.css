@@ -58,6 +58,14 @@ h1, h2, h3, h4 { margin: 0; }
 .search { width: 280px; height: 34px; border: 1px solid var(--line-2); border-radius: 8px; display: flex; align-items: center; gap: 8px; padding: 0 10px; color: var(--ink-3); background: var(--surface); cursor: text; text-align: left; }
 .search:hover { border-color: var(--ink-3); }
 .kbd { margin-left: auto; font-size: 11px; border: 1px solid var(--line-2); border-radius: 4px; padding: 0 5px; color: var(--ink-2); white-space: nowrap; }
+.mode-switch { display: inline-flex; align-items: center; background: var(--line); border-radius: 6px; padding: 2px; gap: 2px; height: 30px; }
+.mode-btn { border: none; background: transparent; color: var(--ink-2); font-size: 12px; font-weight: 500; padding: 2px 10px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all 0.15s ease; height: 26px; font-family: inherit; }
+.mode-btn:hover { color: var(--ink); }
+.mode-btn.active { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+.mode-btn:disabled { opacity: 0.6; cursor: wait; }
+.mode-btn .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); }
+.mode-btn.active .dot.live { background: #16a34a; box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.2); }
+.mode-btn.active .dot.demo { background: #d97706; box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.2); }
 .live { display: flex; align-items: center; gap: 7px; color: var(--ink-2); font-size: 13px; text-decoration: none; white-space: nowrap; }
 .live b { width: 7px; height: 7px; border-radius: 50%; background: var(--ink); box-shadow: 0 0 0 3px var(--line); }
 .live.demo b { background: #fff; border: 1.5px solid var(--ink); }

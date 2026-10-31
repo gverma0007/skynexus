@@ -3,24 +3,28 @@
 from __future__ import annotations
 
 import json
-import threading
-import time
 
 from shapely.geometry import Point, shape
 from shapely.prepared import prep
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-_lock = threading.Lock()
-_cache: tuple[float, list[dict]] | None = None
+from app.core.cache import TTLCache
+
 TTL_S = 300.0
+_cache: TTLCache[list[dict]] = TTLCache(ttl_seconds=TTL_S)
+
+
+def point_to_wkt(lon: float, lat: float) -> str:
+    """Format coordinates into WKT Point string (POINT(lon lat))."""
+    return f"POINT({lon:.4f} {lat:.4f})"
 
 
 def region_shapes(db: Session) -> list[dict]:
-    global _cache
-    with _lock:
-        if _cache and time.monotonic() - _cache[0] < TTL_S:
-            return _cache[1]
+    cached = _cache.get()
+    if cached is not None:
+        return cached
+
     rows = db.execute(text(
         "SELECT id::text, name, ST_AsGeoJSON(geom), ST_Y(centroid), ST_X(centroid) FROM regions"
     )).all()
@@ -31,8 +35,7 @@ def region_shapes(db: Session) -> list[dict]:
                        "bounds": geom.bounds, "lat": float(lat), "lon": float(lon)})
     # Smaller zones first so overlapping zones resolve to the most specific one.
     shapes.sort(key=lambda s: s["geom"].area)
-    with _lock:
-        _cache = (time.monotonic(), shapes)
+    _cache.set(shapes)
     return shapes
 
 
@@ -45,7 +48,15 @@ def region_for(shapes: list[dict], lat: float, lon: float) -> dict | None:
     return None
 
 
+def get_region_outlines(db: Session) -> list[dict]:
+    """Boundary rings as [lat, lon] pairs, for the globe."""
+    rows = db.execute(text("SELECT id::text, name, ST_AsGeoJSON(geom) FROM regions")).all()
+    return [
+        {"id": rid, "name": name,
+         "ring": [[float(lat), float(lon)] for lon, lat in json.loads(gj)["coordinates"][0]]}
+        for rid, name, gj in rows
+    ]
+
+
 def invalidate() -> None:
-    global _cache
-    with _lock:
-        _cache = None
+    _cache.invalidate()

@@ -45,9 +45,9 @@ export function headline(regions: Region[]): { title: string; sub: string } {
 }
 
 export default function Overview({ regions, regionsError, outlines, selectedId }: Props) {
-  const flights = usePoll(api.flights, 60_000);
+  const flights = usePoll(() => api.flights(3000), 60_000);
   const sats = usePoll(api.satellites, 30_000);
-  const events = usePoll(() => api.events({ days: 2 }), 120_000);
+  const events = usePoll(() => api.events({ days: 7 }), 120_000);
   const [layers, setLayers] = useState<Layers>({ aircraft: true, satellites: true, events: true, outlines: true });
   const [filter, setFilter] = useState<'all' | 'watch'>('all');
   const watched = useSetStore(watchlist);

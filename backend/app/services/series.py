@@ -17,13 +17,16 @@ traffic collapse.
 from __future__ import annotations
 
 import re
-import threading
+import statistics
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
+import numpy as np
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+from app.core.cache import TTLCache
 
 WINDOW_HOURS = 8 * 24
 CACHE_TTL_S = 45.0
@@ -53,14 +56,11 @@ class SeriesBundle:
     events: list[dict] = field(default_factory=list)
 
 
-_cache: SeriesBundle | None = None
-_lock = threading.Lock()
+_bundle_cache: TTLCache[SeriesBundle] = TTLCache(ttl_seconds=CACHE_TTL_S)
 
 
 def invalidate() -> None:
-    global _cache
-    with _lock:
-        _cache = None
+    _bundle_cache.invalidate()
 
 
 def magnitude_of(description: str | None, severity: str | None) -> float:
@@ -71,18 +71,30 @@ def magnitude_of(description: str | None, severity: str | None) -> float:
 
 
 def get_series(db: Session, now: datetime | None = None) -> SeriesBundle:
-    global _cache
-    with _lock:
-        if now is None and _cache is not None and time.monotonic() - _cache.built_at < CACHE_TTL_S:
-            return _cache
+    if now is None:
+        cached = _bundle_cache.get()
+        if cached is not None:
+            return cached
     bundle = _build(db, now)
     if now is None:
-        with _lock:
-            _cache = bundle
+        _bundle_cache.set(bundle)
     return bundle
 
 
 def _build(db: Session, now: datetime | None) -> SeriesBundle:
+    from app.core.config import get_settings
+
+    mode = get_settings().DATA_MODE
+    if now is None and mode == "demo":
+        max_ts = db.execute(text("SELECT MAX(timestamp) FROM flight_observations WHERE source = 'demo_dataset'")).scalar()
+        if max_ts:
+            now = max_ts
+
+    src_fo = "AND fo.source = 'demo_dataset'" if mode == "demo" else "AND fo.source != 'demo_dataset'"
+    src_raw_fo = "AND source = 'demo_dataset'" if mode == "demo" else "AND source != 'demo_dataset'"
+    src_wo = "AND source = 'demo_dataset'" if mode == "demo" else "AND source != 'demo_dataset'"
+    src_ev = "AND e.source = 'demo_dataset'" if mode == "demo" else "AND e.source != 'demo_dataset'"
+
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     current_hour = now.replace(minute=0, second=0, microsecond=0)
     hours = [current_hour - timedelta(hours=h) for h in range(WINDOW_HOURS - 1, -1, -1)]
@@ -94,40 +106,40 @@ def _build(db: Session, now: datetime | None) -> SeriesBundle:
     )).all()
 
     flight_rows = db.execute(text(
-        """
+        f"""
         SELECT fr.region_id::text, date_trunc('hour', fo.timestamp) AS hr,
                COUNT(DISTINCT fo.icao24)
         FROM flight_observations fo
         JOIN flight_routes fr ON fr.id = fo.route_id
-        WHERE fo.timestamp >= :start AND fo.timestamp <= :now AND fr.region_id IS NOT NULL
+        WHERE fo.timestamp >= :start AND fo.timestamp <= :now AND fr.region_id IS NOT NULL {src_fo}
         GROUP BY 1, 2
         """
     ), {"start": start, "now": now}).all()
 
     global_hours = {
         r[0] for r in db.execute(text(
-            """
+            f"""
             SELECT DISTINCT date_trunc('hour', timestamp) FROM flight_observations
-            WHERE timestamp >= :start AND timestamp <= :now
+            WHERE timestamp >= :start AND timestamp <= :now {src_raw_fo}
             """
         ), {"start": start, "now": now}).all()
     }
 
     weather_rows = db.execute(text(
-        """
+        f"""
         SELECT region_id::text, date_trunc('hour', timestamp), AVG(storm_index)
         FROM weather_observations
-        WHERE timestamp >= :start - interval '1 day' AND timestamp <= :now
+        WHERE timestamp >= :start - interval '1 day' AND timestamp <= :now {src_wo}
         GROUP BY 1, 2 ORDER BY 2
         """
     ), {"start": start, "now": now}).all()
 
     event_rows = db.execute(text(
-        """
+        f"""
         SELECT e.id::text, e.region_id::text, e.event_date, e.event_type, e.severity,
                e.description, ST_Y(e.position), ST_X(e.position), e.source
         FROM events e
-        WHERE e.event_date >= :start AND e.event_date <= :now
+        WHERE e.event_date >= :start AND e.event_date <= :now {src_ev}
         ORDER BY e.event_date DESC
         """
     ), {"start": start, "now": now}).all()
@@ -180,3 +192,81 @@ def _build(db: Session, now: datetime | None) -> SeriesBundle:
             rs.events[i] += 1
             rs.max_mag[i] = max(rs.max_mag[i], mag)
     return bundle
+
+
+def compute_region_history(bundle: SeriesBundle, region_id: str, hours: int = 48) -> dict | None:
+    """Hourly aircraft, storm and event counts with a 'normal range' band.
+
+    The band for each hour is mean +/- 1 std of the same hour of day over the
+    baseline days (data older than 24 h).
+    """
+    rs = bundle.regions.get(region_id)
+    if rs is None:
+        return None
+    end_idx = len(bundle.hours) - 1
+    base_idx = [i for i in range(0, end_idx - 24) if rs.aircraft[i] is not None]
+    by_hod: dict[int, list[float]] = {}
+    for i in base_idx:
+        by_hod.setdefault(rs.hours[i].hour, []).append(rs.aircraft[i])
+
+    points = []
+    for i in range(max(0, end_idx - hours), end_idx + 1):
+        vals = by_hod.get(rs.hours[i].hour, [])
+        band = None
+        if len(vals) >= 3:
+            m, sd = statistics.fmean(vals), statistics.pstdev(vals)
+            band = [round(max(0.0, m - sd), 1), round(m + sd, 1)]
+        points.append({
+            "time": rs.hours[i].isoformat(),
+            "aircraft": rs.aircraft[i],
+            "partial": i == end_idx,
+            "storm": None if rs.storm[i] is None else round(rs.storm[i], 1),
+            "events": rs.events[i],
+            "normal_range": band,
+        })
+    return {
+        "region_id": rs.region_id,
+        "region_name": rs.name,
+        "points": points,
+        "baseline_hours": len(base_idx),
+    }
+
+
+def compute_region_forecast(bundle: SeriesBundle, region_id: str, horizon_hours: int = 6) -> dict | None:
+    """Linear trend on the last 12 complete hours of air traffic, with a
+    +/- 1 residual-std band."""
+    rs = bundle.regions.get(region_id)
+    if rs is None:
+        return None
+    end_idx = len(bundle.hours) - 1
+    pts = [(i, rs.aircraft[i]) for i in range(end_idx - 12, end_idx) if i >= 0 and rs.aircraft[i] is not None]
+    if len(pts) < 3:
+        return {
+            "region_id": rs.region_id,
+            "region_name": rs.name,
+            "points": [],
+            "history": [],
+            "method": "insufficient data",
+        }
+    x = np.array([p[0] for p in pts], dtype=float)
+    y = np.array([p[1] for p in pts], dtype=float)
+    slope, intercept = np.polyfit(x, y, 1)
+    resid = float(np.std(y - (slope * x + intercept)))
+    out = []
+    for h in range(0, horizon_hours + 1):
+        xi = end_idx + h
+        v = max(0.0, slope * xi + intercept)
+        out.append({
+            "time": (rs.hours[end_idx] + timedelta(hours=h)).isoformat(),
+            "value": round(v, 1),
+            "low": round(max(0.0, v - resid), 1),
+            "high": round(v + resid, 1),
+        })
+    return {
+        "region_id": rs.region_id,
+        "region_name": rs.name,
+        "history": [{"time": rs.hours[i].isoformat(), "value": v} for i, v in pts],
+        "points": out,
+        "trend_per_hour": round(float(slope), 2),
+        "method": "linear trend, last 12 h",
+    }

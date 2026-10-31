@@ -61,5 +61,20 @@ def test_report_round_trip(client):
 
 def test_misc_endpoints(client):
     for path in ("/api/stats", "/api/flights/live", "/api/satellites/live", "/api/events",
-                 "/api/anomalies", "/api/alerts", "/api/system/health", "/api/search?q=a"):
+                 "/api/anomalies", "/api/alerts", "/api/system/health", "/api/system/mode", "/api/search?q=a"):
         assert client.get(path).status_code == 200, path
+
+
+def test_system_mode_toggle(client):
+    res = client.get("/api/system/mode")
+    assert res.status_code == 200
+    orig_mode = res.json()["data_mode"]
+
+    # Toggle to live
+    set_live = client.post("/api/system/mode", json={"mode": "live"})
+    assert set_live.status_code == 200
+    assert set_live.json()["data_mode"] == "live"
+
+    # Restore original mode
+    client.post("/api/system/mode", json={"mode": orig_mode})
+

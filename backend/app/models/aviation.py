@@ -30,12 +30,7 @@ class Region(Base):
     )
 
     airports = relationship("Airport", back_populates="region")
-    flight_routes_origin = relationship(
-        "FlightRoute", back_populates="origin_region", primaryjoin="Region.id == foreign(FlightRoute.origin_airport_id)"
-    )
-    flight_routes_dest = relationship(
-        "FlightRoute", back_populates="dest_region", primaryjoin="Region.id == foreign(FlightRoute.dest_airport_id)"
-    )
+    flight_routes = relationship("FlightRoute", back_populates="region")
 
     __table_args__ = (
         Index("ix_regions_geom", "geom", postgresql_using="gist"),
@@ -73,6 +68,8 @@ class Satellite(Base):
     tle_line1 = Column(String(200))
     tle_line2 = Column(String(200))
 
+    observations = relationship("SatelliteObservation", back_populates="satellite")
+
 
 class SatelliteObservation(Base):
     __tablename__ = "satellite_observations"
@@ -84,6 +81,8 @@ class SatelliteObservation(Base):
     altitude_km = Column(Float, nullable=False)
     source = Column(String(50), nullable=False)
     ingested_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    satellite = relationship("Satellite", back_populates="observations")
 
     __table_args__ = (
         Index("ix_satellite_observations_position", "position", postgresql_using="gist"),
@@ -143,18 +142,9 @@ class FlightRoute(Base):
         UUID(as_uuid=True), ForeignKey("regions.id"), nullable=True
     )
 
-    origin_region = relationship(
-        "Region",
-        foreign_keys=[origin_airport_id],
-        primaryjoin="FlightRoute.origin_airport_id == Region.id",
-        back_populates="flight_routes_origin",
-    )
-    dest_region = relationship(
-        "Region",
-        foreign_keys=[dest_airport_id],
-        primaryjoin="FlightRoute.dest_airport_id == Region.id",
-        back_populates="flight_routes_dest",
-    )
+    origin_airport = relationship("Airport", foreign_keys=[origin_airport_id])
+    dest_airport = relationship("Airport", foreign_keys=[dest_airport_id])
+    region = relationship("Region", foreign_keys=[region_id], back_populates="flight_routes")
 
     __table_args__ = (
         Index(

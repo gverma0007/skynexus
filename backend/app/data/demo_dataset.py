@@ -43,13 +43,13 @@ SRC = "demo_dataset"
 
 # Mean aircraft per hour at the daily peak, base storm level, quake activity.
 PROFILE = {
-    "Middle East": (120, 8, 0.10), "Eastern Europe": (85, 10, 0.02),
-    "South China Sea": (105, 18, 0.15), "North Atlantic": (130, 22, 0.03),
-    "Pacific": (22, 12, 0.20), "Black Sea": (40, 12, 0.05), "Red Sea": (45, 9, 0.06),
-    "Taiwan Strait": (70, 14, 0.35), "Korean Peninsula": (85, 10, 0.15),
-    "Eastern Mediterranean": (55, 14, 0.18), "Baltic Sea": (50, 16, 0.01),
-    "Horn of Africa": (20, 8, 0.05), "Bay of Bengal": (45, 20, 0.04),
-    "Caribbean": (60, 15, 0.12), "Gulf of Guinea": (30, 12, 0.01),
+    "Middle East": (240, 8, 0.15), "Eastern Europe": (170, 10, 0.05),
+    "South China Sea": (210, 18, 0.20), "North Atlantic": (260, 22, 0.05),
+    "Pacific": (60, 12, 0.25), "Black Sea": (90, 12, 0.08), "Red Sea": (100, 9, 0.10),
+    "Taiwan Strait": (150, 14, 0.40), "Korean Peninsula": (170, 10, 0.20),
+    "Eastern Mediterranean": (120, 14, 0.22), "Baltic Sea": (110, 16, 0.02),
+    "Horn of Africa": (50, 8, 0.08), "Bay of Bengal": (100, 20, 0.06),
+    "Caribbean": (130, 15, 0.16), "Gulf of Guinea": (70, 12, 0.02),
 }
 
 # (region, hours_back_start, multiplier) applied to traffic for the latest hours
@@ -81,19 +81,19 @@ QUAKE_PLACES = {
 CONSTELLATIONS = [
     ("ISS (ZARYA)", "station", 1, 51.64, 15.50, 0.0004, 25544),
     ("CSS (TIANHE)", "station", 1, 41.47, 15.60, 0.0005, 48274),
-    ("NOAA", "weather", 4, 98.9, 14.13, 0.0012, 33591),
-    ("METOP", "weather", 3, 98.7, 14.21, 0.0002, 38771),
-    ("GOES", "weather", 2, 0.05, 1.0027, 0.0001, 51850),
+    ("NOAA", "weather", 16, 98.9, 14.13, 0.0012, 33591),
+    ("METOP", "weather", 12, 98.7, 14.21, 0.0002, 38771),
+    ("GOES", "weather", 8, 0.05, 1.0027, 0.0001, 51850),
     ("HUBBLE SPACE TELESCOPE", "science", 1, 28.47, 15.14, 0.0002, 20580),
     ("SWIFT", "science", 1, 20.56, 15.25, 0.0009, 28485),
-    ("SARSAT", "science", 6, 98.6, 14.2, 0.0011, 40069),
-    ("GPS BIIF", "nav", 12, 55.0, 2.0057, 0.009, 39166),
-    ("GALILEO", "nav", 10, 56.0, 1.7048, 0.0003, 49809),
-    ("FLOCK 4X", "earthobs", 30, 97.5, 15.22, 0.0008, 56170),
-    ("SENTINEL", "earthobs", 6, 98.6, 14.31, 0.0001, 40697),
-    ("STARLINK", "comms", 70, 53.05, 15.06, 0.0001, 57900),
-    ("ONEWEB", "comms", 20, 87.9, 13.16, 0.0002, 51080),
-    ("IRIDIUM", "comms", 12, 86.4, 14.34, 0.0002, 56720),
+    ("SARSAT", "science", 24, 98.6, 14.2, 0.0011, 40069),
+    ("GPS BIIF", "nav", 32, 55.0, 2.0057, 0.009, 39166),
+    ("GALILEO", "nav", 30, 56.0, 1.7048, 0.0003, 49809),
+    ("FLOCK 4X", "earthobs", 180, 97.5, 15.22, 0.0008, 56170),
+    ("SENTINEL", "earthobs", 24, 98.6, 14.31, 0.0001, 40697),
+    ("STARLINK", "comms", 600, 53.05, 15.06, 0.0001, 57900),
+    ("ONEWEB", "comms", 120, 87.9, 13.16, 0.0002, 51080),
+    ("IRIDIUM", "comms", 66, 86.4, 14.34, 0.0002, 56720),
 ]
 
 
@@ -222,13 +222,17 @@ def generate(rng: random.Random) -> dict:
                 ma = (360.0 / max(1, n // planes)) * (k // planes) + rng.uniform(0, 30)
                 l1, l2 = make_tle(norad, inc, raan, ecc, rng.uniform(0, 360), ma, mm, now)
                 sat_rows.append((norad, label, category, l1, l2))
-        execute_values(cur, "INSERT INTO satellites (id, norad_id, name, category, tle_line1, tle_line2) VALUES %s",
-                       sat_rows, template="(gen_random_uuid(), %s, %s, %s, %s, %s)")
+        execute_values(cur, """
+            INSERT INTO satellites (id, norad_id, name, category, tle_line1, tle_line2) VALUES %s
+            ON CONFLICT (norad_id) DO UPDATE
+            SET name = EXCLUDED.name, category = EXCLUDED.category,
+                tle_line1 = EXCLUDED.tle_line1, tle_line2 = EXCLUDED.tle_line2
+            """, sat_rows, template="(gen_random_uuid(), %s, %s, %s, %s, %s)")
         raw.commit()
         cur.execute("SELECT norad_id, id::text FROM satellites")
         sat_ids = dict(cur.fetchall())
         step = timedelta(minutes=30)
-        t = now - timedelta(days=6)
+        t = now - timedelta(hours=6)
         times = []
         while t <= now + timedelta(minutes=60):
             times.append(t)
