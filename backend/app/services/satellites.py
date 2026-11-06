@@ -75,6 +75,48 @@ def get_region_overhead(db: Session, region_id: str) -> dict:
     return {"region_id": region_id, "count": len(sats), "by_category": by_cat, "satellites": sats[:50]}
 
 
+def get_all_region_overhead(db: Session) -> dict[str, dict]:
+    """Map of region_id -> satellite overhead, orbital distribution (LEO/MEO/GEO), and density."""
+    shapes = region_shapes(db)
+    shape_areas = {s["id"]: max(1.0, float(s.get("geom").area)) for s in shapes}
+    positions = live_positions(db)
+    by_region: dict[str, dict] = {
+        s["id"]: {
+            "count": 0,
+            "by_category": {},
+            "by_orbit": {"leo": 0, "meo": 0, "geo": 0},
+            "satellites": [],
+            "leo_earthobs": 0,
+            "gnss_nav": 0,
+            "density": 0.0,
+            "area_sq_deg": shape_areas[s["id"]],
+        }
+        for s in shapes
+    }
+    for sat in positions:
+        rid = sat.get("region_id")
+        if not rid or rid not in by_region:
+            continue
+        entry = by_region[rid]
+        entry["count"] += 1
+        alt = sat.get("altitude_km", 0.0)
+        orbit = "leo" if alt < 2000 else "meo" if alt < 35700 else "geo"
+        entry["by_orbit"][orbit] += 1
+        cat_lbl = sat.get("category_label", "Other")
+        entry["by_category"][cat_lbl] = entry["by_category"].get(cat_lbl, 0) + 1
+        if sat.get("category") == "earthobs" and orbit == "leo":
+            entry["leo_earthobs"] += 1
+        if sat.get("category") == "nav" and orbit == "meo":
+            entry["gnss_nav"] += 1
+        entry["satellites"].append(sat)
+
+    for rid, entry in by_region.items():
+        entry["density"] = round(entry["count"] / entry["area_sq_deg"] * 100.0, 2)
+        entry["satellites"].sort(key=lambda s: (s["category"] != "station", s["altitude_km"]))
+        entry["satellites"] = entry["satellites"][:50]
+    return by_region
+
+
 def get_satellite_categories(db: Session) -> list[dict]:
     """Summary of satellite counts by functional category."""
     rows = db.execute(text(

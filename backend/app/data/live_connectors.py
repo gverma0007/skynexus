@@ -82,6 +82,7 @@ REGION_QUERY_POINTS: dict[str, list[tuple[float, float]]] = {
     "Bay of Bengal": [(13.0, 88.0), (17.5, 84.0), (10.0, 92.0)],
     "Caribbean": [(18.0, -73.0), (14.0, -68.0), (22.0, -78.0)],
     "Gulf of Guinea": [(3.0, 5.0), (5.5, 0.0), (2.0, 8.5)],
+    "India-Pakistan Border": [(31.5, 74.3), (28.6, 77.1), (33.6, 73.0)],
     "Middle East": [
         (25.0, 47.5), (25.2, 55.3), (29.2, 47.9),
         (21.5, 39.2),   # Jeddah
@@ -149,6 +150,7 @@ ZONE_ANCHOR_IATA: dict[str, str] = {
     "Bay of Bengal": "SIN",
     "Caribbean": "JFK",
     "Gulf of Guinea": "LHR",
+    "India-Pakistan Border": "DEL",
 }
 
 
@@ -189,8 +191,8 @@ def _route_for(db: Session, region: Region) -> FlightRoute | None:
 
 # ---------------------------------------------------------------- flights --
 def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -> int:
-    """Pull live ADS-B positions and attach each aircraft to the region it is
-    actually inside (probe circles overlap and extend past zone borders)."""
+    """Pull live aircraft positions from OpenSky Network (worldwide coverage),
+    supplemented by adsb.lol for regional coverage gaps."""
     from app.services.geo import region_for, region_shapes
 
     shapes = region_shapes(db)
@@ -201,56 +203,113 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
             routes[str(region.id)] = route
 
     aircraft_by_hex: dict[str, dict] = {}
+    now = datetime.now(timezone.utc)
     client = httpx.Client(timeout=20, headers=UA)
+
+    # 1. Primary: OpenSky Network worldwide snapshot (10,000+ live planes in 1 call)
     try:
-        for region_name, points in REGION_QUERY_POINTS.items():
+        res = client.get("https://opensky-network.org/api/states/all")
+        if res.status_code == 200:
+            states = res.json().get("states", []) or []
+            for s in states:
+                if len(s) < 11:
+                    continue
+                hex_id = (s[0] or "").strip().lower()
+                lon, lat = s[5], s[6]
+                if not hex_id or lat is None or lon is None:
+                    continue
+                reg = region_for(shapes, float(lat), float(lon))
+                if not reg or reg["id"] not in routes:
+                    continue
+                alt_m = s[7]
+                alt_ft = int(alt_m * 3.28084) if isinstance(alt_m, (int, float)) else 0
+                spd_ms = s[9]
+                spd_kt = round(float(spd_ms) * 1.94384, 1) if isinstance(spd_ms, (int, float)) else 0.0
+                track = float(s[10]) if isinstance(s[10], (int, float)) else 0.0
+                aircraft_by_hex[hex_id] = {
+                    "lat": float(lat),
+                    "lon": float(lon),
+                    "callsign": (s[1] or "").strip(),
+                    "alt_ft": alt_ft,
+                    "speed_kt": spd_kt,
+                    "heading_deg": track,
+                    "source": "opensky",
+                    "region_id": reg["id"],
+                }
+            logger.info("OpenSky tracked %d aircraft across monitored regions", len(aircraft_by_hex))
+        else:
+            logger.warning("OpenSky API returned HTTP %s", res.status_code)
+    except Exception as exc:
+        logger.warning("OpenSky fetch failed: %s", exc)
+
+    # 2. Secondary / Fallback: probe regions with sparse aircraft coverage via adsb.lol
+    counts_per_region: dict[str, int] = {}
+    for ac in aircraft_by_hex.values():
+        rid = ac.get("region_id")
+        if rid:
+            counts_per_region[rid] = counts_per_region.get(rid, 0) + 1
+
+    regions_by_name = {r.name: str(r.id) for r in db.query(Region).all()}
+    sparse_regions = [
+        rname for rname, points in REGION_QUERY_POINTS.items()
+        if counts_per_region.get(regions_by_name.get(rname, ""), 0) < 15
+    ]
+
+    if sparse_regions or not aircraft_by_hex:
+        targets = sparse_regions if aircraft_by_hex else list(REGION_QUERY_POINTS.keys())
+        for region_name in targets:
+            points = REGION_QUERY_POINTS.get(region_name, [])[:2]
             for lat, lon in points:
                 try:
                     res = client.get(f"https://api.adsb.lol/v2/point/{lat}/{lon}/{ADSB_RADIUS_NM}")
                     if res.status_code == 200:
                         for ac in res.json().get("ac", []) or []:
-                            hex_id = (ac.get("hex") or "").strip()
-                            if hex_id and "lat" in ac and "lon" in ac:
-                                aircraft_by_hex[hex_id] = ac
+                            hex_id = (ac.get("hex") or "").strip().lower()
+                            if hex_id and "lat" in ac and "lon" in ac and hex_id not in aircraft_by_hex:
+                                reg = region_for(shapes, float(ac["lat"]), float(ac["lon"]))
+                                if reg and reg["id"] in routes:
+                                    alt = ac.get("alt_baro")
+                                    aircraft_by_hex[hex_id] = {
+                                        "lat": float(ac["lat"]),
+                                        "lon": float(ac["lon"]),
+                                        "callsign": (ac.get("flight") or ac.get("r") or "").strip(),
+                                        "alt_ft": int(alt) if isinstance(alt, (int, float)) else 0,
+                                        "speed_kt": float(ac.get("gs") or 0.0),
+                                        "heading_deg": float(ac.get("track") or 0.0),
+                                        "source": "adsb.lol",
+                                        "region_id": reg["id"],
+                                    }
                     elif res.status_code == 429:
-                        logger.warning("adsb.lol %s -> HTTP 429, backing off", region_name)
-                        time.sleep(1.5)
-                    else:
-                        logger.warning("adsb.lol %s -> HTTP %s", region_name, res.status_code)
-                    time.sleep(0.5)  # stay friendly to the free API
+                        logger.warning("adsb.lol %s -> HTTP 429, skipping points", region_name)
+                        break
+                    time.sleep(0.8)
                 except Exception as exc:
                     logger.warning("adsb.lol point %s failed: %s", (lat, lon), exc)
-    finally:
-        client.close()
+    client.close()
 
-    now = datetime.now(timezone.utc)
     per_region: dict[str, int] = {}
     total = 0
     for hex_id, ac in aircraft_by_hex.items():
-        try:
-            lat, lon = float(ac["lat"]), float(ac["lon"])
-        except (TypeError, ValueError):
+        reg_id = ac.get("region_id")
+        if not reg_id or reg_id not in routes:
             continue
-        reg = region_for(shapes, lat, lon)
-        if reg is None or reg["id"] not in routes:
+        if per_region.get(reg_id, 0) >= max_per_region:
             continue
-        if per_region.get(reg["id"], 0) >= max_per_region:
-            continue
-        alt = ac.get("alt_baro")
         db.add(FlightObservation(
-            route_id=routes[reg["id"]].id,
-            callsign=(ac.get("flight") or ac.get("r") or "UNKNOWN").strip()[:64] or "UNKNOWN",
+            route_id=routes[reg_id].id,
+            callsign=ac["callsign"][:64] or "UNKNOWN",
             icao24=hex_id[:64],
             timestamp=now,
-            position=point_to_wkt(lon, lat),
-            altitude_ft=int(alt) if isinstance(alt, (int, float)) else 0,  # "ground" -> 0
-            speed_kt=float(ac.get("gs") or 0.0),
-            heading_deg=float(ac.get("track") or 0.0),
-            source="adsb.lol",
+            position=point_to_wkt(ac["lon"], ac["lat"]),
+            altitude_ft=ac["alt_ft"],
+            speed_kt=ac["speed_kt"],
+            heading_deg=ac["heading_deg"],
+            source=ac.get("source", "opensky"),
         ))
-        per_region[reg["id"]] = per_region.get(reg["id"], 0) + 1
+        per_region[reg_id] = per_region.get(reg_id, 0) + 1
         total += 1
     db.commit()
+    logger.info("Total live flights stored: %d across %d regions", total, len(per_region))
     return total
 
 

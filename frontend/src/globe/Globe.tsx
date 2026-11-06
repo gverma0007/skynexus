@@ -35,6 +35,7 @@ interface Props {
   focus: { lat: number; lon: number; key: string } | null;
   onSelectRegion: (id: string | null) => void;
   onSelectSat: (id: number) => void;
+  onSelectFlight?: (icao24: string) => void;
 }
 
 interface Tip {
@@ -168,7 +169,7 @@ export default function Globe(props: Props) {
     if (!hit) return setTip(null);
     if (hit.kind === 'sat') setTip({ x, y, title: hit.item.label, sub: 'Satellite. Click for orbit details.' });
     else if (hit.kind === 'event') setTip({ x, y, title: hit.item.label });
-    else if (hit.kind === 'flight') setTip({ x, y, title: hit.item.label });
+    else if (hit.kind === 'flight') setTip({ x, y, title: hit.item.label, sub: 'Aircraft route. Click for planned vs actual path.' });
     else setTip({ x, y, title: `${hit.item.name}`, sub: `Disruption index ${Math.round(hit.item.score)}` });
   };
 
@@ -180,6 +181,7 @@ export default function Globe(props: Props) {
     const hit = pick(x, y);
     if (hit?.kind === 'sat') props.onSelectSat(hit.item.id);
     else if (hit?.kind === 'region') props.onSelectRegion(hit.item.id);
+    else if (hit?.kind === 'flight') props.onSelectFlight?.(String(hit.item.id));
   };
 
   const onWheel = (ev: React.WheelEvent) => {

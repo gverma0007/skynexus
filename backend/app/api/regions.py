@@ -60,3 +60,46 @@ def region_forecast(region_id: UUID, horizon_hours: int = Query(6, ge=1, le=24),
     if result is None:
         raise HTTPException(status_code=404, detail="Region not found")
     return result
+
+
+@router.get("/regions/{region_id}/analysis")
+def region_analysis(region_id: UUID, db: Session = Depends(get_db)):
+    """Detailed analysis of air traffic, satellite paths, and deviations for the region."""
+    from app.services.reports import build_metrics
+    from app.services.flights import get_live_flights
+    from app.models.engine import AnomalyScore
+
+    rid_str = str(region_id)
+    disruption = _disruption_or_404(db, rid_str)
+    overhead = get_region_overhead(db, rid_str)
+    metrics = build_metrics(db, rid_str, hours=24)
+    live_flights = [f for f in get_live_flights(db, limit=300) if f.get("region_id") == rid_str]
+    anomalies = [
+        {
+            "id": str(a.id), "timestamp": a.timestamp.isoformat(),
+            "feature_name": a.feature_name, "observed_value": a.observed_value,
+            "z_score": a.z_score, "composite_score": a.composite_score,
+            "severity_label": a.severity_label
+        }
+        for a in db.query(AnomalyScore).filter(AnomalyScore.region_id == region_id)
+        .order_by(AnomalyScore.timestamp.desc()).limit(10).all()
+    ]
+    return {
+        "region_id": rid_str,
+        "region_name": disruption["region_name"],
+        "disruption": disruption,
+        "metrics_24h": metrics,
+        "air_traffic": {
+            "live_count": len(live_flights),
+            "flights": live_flights[:20],
+            "component": disruption["components"]["flights"],
+        },
+        "satellites": {
+            "overhead_count": overhead["count"],
+            "by_category": overhead["by_category"],
+            "overhead_satellites": overhead["satellites"][:20],
+            "passes_24h": metrics.get("satellite_metrics") if metrics else None,
+        },
+        "anomalies": anomalies,
+    }
+

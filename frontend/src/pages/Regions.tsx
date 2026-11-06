@@ -162,6 +162,9 @@ export default function Regions({ regions, error }: { regions: Region[] | null; 
                 <Bar label="Air traffic" value={r.flight_anomaly_score} display={r.components.flights.pct_change === null ? '–' : fmtPct(r.components.flights.pct_change)} />
                 <Bar label="Earthquakes" value={r.event_relevance_score} display={String(r.components.events.count_24h)} />
                 <Bar label="Storm" value={r.weather_score} display={fmtNum(r.components.weather.storm_now)} />
+                {r.satellite_score !== undefined && (
+                  <Bar label="Satellites" value={r.satellite_score} display={`${r.components?.satellites?.count ?? 0} sat`} />
+                )}
                 <p className="small muted">{r.explanation[0]}</p>
                 <div className="row-gap">
                   <button className="btn small" onClick={() => go('overview', r.region_id)}>Open on globe</button>

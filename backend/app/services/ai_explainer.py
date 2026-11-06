@@ -56,6 +56,10 @@ def template_explanation(m: dict) -> str:
             f"({_fmt_pct(av['delta_pct'])} on the previous {hours} hours)."
         )
 
+    if av.get("week_delta_pct") is not None and abs(av["week_delta_pct"]) >= 15:
+        w_word = "above" if av["week_delta_pct"] > 0 else "below"
+        parts.append(f"Traffic is running {abs(av['week_delta_pct']):.0f}% {w_word} the 7-day weekly average.")
+
     if ev["after"] > 0:
         largest = ev.get("largest")
         tail = f", the largest {largest}" if largest else ""
@@ -72,6 +76,31 @@ def template_explanation(m: dict) -> str:
         else:
             parts.append(f"Storm intensity stayed low ({wx['after']:.0f}/100), so weather is unlikely "
                          f"to explain changes in traffic.")
+
+    fdev = m.get("flight_deviations")
+    if fdev and fdev.get("significant_deviations", 0) > 0:
+        parts.append(
+            f"Significant flight route deviations were observed ({fdev['significant_deviations']} flight(s) "
+            f"deviating up to {fdev['max_deviation_km']:.0f} km from nominal flight corridors)."
+        )
+    elif fdev and fdev.get("deviating_flights", 0) > 0:
+        parts.append(
+            f"Minor route diversions were noted ({fdev['deviating_flights']} flight(s) off nominal corridors)."
+        )
+
+    sat = m.get("satellite_metrics")
+    if sat and sat.get("after") is not None:
+        if sat.get("delta_pct") is not None and abs(sat["delta_pct"]) >= 10:
+            sw = "rose" if sat["delta_pct"] > 0 else "fell"
+            parts.append(
+                f"Satellite passes {sw} {abs(sat['delta_pct']):.0f}% "
+                f"({sat['after']} passes vs {sat['before']} in the previous window)."
+            )
+        else:
+            parts.append(
+                f"Satellite coverage was steady with {sat['after']} passes "
+                f"({_fmt_pct(sat.get('delta_pct'))} delta)."
+            )
     return " ".join(parts)
 
 

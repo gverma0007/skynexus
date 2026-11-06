@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 from app.models.aviation import WhatChangedReport
 from app.services.ai_explainer import get_ai_explanation
 from app.services.disruption import score_region
-from app.services.series import get_series
+from app.services.flights import get_all_region_flight_deviations
+from app.services.satellites import get_all_region_overhead
+from app.services.series import compute_region_history, get_series
 
 
 def _pct(before: float | None, after: float | None) -> float | None:
@@ -58,6 +60,7 @@ def build_metrics(db: Session, region_id: str, hours: int) -> dict | None:
     b_h = cur - timedelta(hours=2 * hours)
     av_after = _avg(window(rs.aircraft, a_h, cur))
     av_before = _avg(window(rs.aircraft, b_h, a_h))
+    av_week = _avg(window(rs.aircraft, cur - timedelta(days=7), cur))
     wx_after = _avg(window(rs.storm, a_h, cur + timedelta(hours=1)))
     wx_before = _avg(window(rs.storm, b_h, a_h))
 
@@ -69,10 +72,16 @@ def build_metrics(db: Session, region_id: str, hours: int) -> dict | None:
     sats_after = _sat_passes(db, rs.region_id, after_start, now)
     sats_before = _sat_passes(db, rs.region_id, before_start, after_start)
 
-    idx_now = score_region(rs, evs, end_idx, now)["composite"]
-    idx_then = (score_region(rs, evs, end_idx - hours, after_start)["composite"]
+    sat_overhead = get_all_region_overhead(db)
+    flight_devs = get_all_region_flight_deviations(db)
+    sat_info = sat_overhead.get(str(region_id))
+    dev_info = flight_devs.get(str(region_id))
+
+    idx_now = score_region(rs, evs, end_idx, now, sat_info=sat_info, dev_info=dev_info)["composite"]
+    idx_then = (score_region(rs, evs, end_idx - hours, after_start, sat_info=sat_info)["composite"]
                 if end_idx - hours > 0 else None)
 
+    hist = compute_region_history(bundle, str(region_id), hours=min(hours * 2, 168))
     covered = [v for v in window(rs.aircraft, b_h, cur) if v is not None]
     confidence = round(min(100.0, len(covered) / (2 * hours) * 100.0), 0)
 
@@ -88,6 +97,16 @@ def build_metrics(db: Session, region_id: str, hours: int) -> dict | None:
         "aviation_metrics": {
             "label": "Air traffic", "unit": "aircraft per hour",
             "before": av_before, "after": av_after, "delta_pct": _pct(av_before, av_after),
+            "week_avg": av_week, "week_delta_pct": _pct(av_week, av_after),
+        },
+        "flight_deviations": {
+            "label": "Flight corridor deviations",
+            "active_routes": dev_info.get("count", 0) if dev_info else 0,
+            "deviating_flights": dev_info.get("deviating_count", 0) if dev_info else 0,
+            "significant_deviations": dev_info.get("significant_count", 0) if dev_info else 0,
+            "max_deviation_km": dev_info.get("max_km", 0.0) if dev_info else 0.0,
+            "avg_deviation_km": dev_info.get("avg_km", 0.0) if dev_info else 0.0,
+            "deviation_score": dev_info.get("dev_score", 0.0) if dev_info else 0.0,
         },
         "events_metrics": {
             "label": "Earthquakes", "unit": "events",
@@ -105,6 +124,19 @@ def build_metrics(db: Session, region_id: str, hours: int) -> dict | None:
         "satellite_metrics": {
             "label": "Satellite passes", "unit": "distinct satellites",
             "before": sats_before, "after": sats_after, "delta_pct": _pct(sats_before, sats_after),
+        },
+        "historical_data": {
+            "baseline_hours": hist.get("baseline_hours", 0) if hist else 0,
+            "points": [
+                {
+                    "time": p["time"],
+                    "aircraft": p["aircraft"],
+                    "storm": p["storm"],
+                    "events": p["events"],
+                    "normal_range": p["normal_range"],
+                }
+                for p in (hist["points"] if hist else [])
+            ],
         },
         "confidence_pct": confidence,
     }

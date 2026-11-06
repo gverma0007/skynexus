@@ -127,6 +127,12 @@ AIRPORTS: dict[str, list[tuple[str, str, float, float]]] = {
         ("ABJ", "Abidjan Felix Houphouet Boigny", 5.2614, -3.9263),
         ("DLA", "Douala Intl", 4.0063, 9.7189),
     ],
+    "India-Pakistan Border": [
+        ("DEL", "Indira Gandhi Intl", 28.5562, 77.1000),
+        ("LHE", "Lahore Allama Iqbal Intl", 31.5216, 74.4036),
+        ("ISB", "Islamabad Intl", 33.5492, 72.8258),
+        ("ATQ", "Amritsar Sri Guru Ram Dass", 31.7096, 74.7973),
+    ],
 }
 
 

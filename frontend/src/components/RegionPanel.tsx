@@ -18,9 +18,12 @@ export default function RegionPanel({ region, onClose }: { region: Region; onClo
   const f = region.components.flights;
   const level = STATUS_LEVEL[region.status];
 
+  const weekSuffix = f.week_pct_change !== null && f.week_pct_change !== undefined
+    ? ` (${fmtPct(f.week_pct_change)} vs wk)`
+    : '';
   const trafficLabel = f.warming_up
     ? 'building baseline'
-    : f.pct_change === null ? 'normal' : fmtPct(f.pct_change);
+    : (f.pct_change === null ? 'normal' : fmtPct(f.pct_change)) + weekSuffix;
 
   return (
     <div className="detail">
@@ -41,11 +44,16 @@ export default function RegionPanel({ region, onClose }: { region: Region; onClo
       <div className="sec">
         <h4>What is driving the score</h4>
         <Bar label="Air traffic" value={region.flight_anomaly_score} display={trafficLabel}
-          hint="Deviation of aircraft per hour from the usual level for this time of day (surges and drops both count)." />
+          hint="Deviation of aircraft per hour from the usual level for this time of day and 7-day weekly moving average." />
         <Bar label="Earthquakes" value={region.event_relevance_score}
           hint="Magnitude-weighted earthquakes in the last 24 h, fading over 12 h." />
         <Bar label="Storm intensity" value={region.weather_score}
           hint="Storm index from wind, gusts and rain at the region centre." />
+        {region.satellite_score !== undefined && (
+          <Bar label="Satellite coverage" value={region.satellite_score}
+            display={`${region.components?.satellites?.count ?? 0} overhead`}
+            hint="Satellite density, surveillance passes (LEO) and navigation geometry (GNSS)." />
+        )}
         <ul className="explain">
           {region.explanation.map((line) => <li key={line}>{line}</li>)}
         </ul>

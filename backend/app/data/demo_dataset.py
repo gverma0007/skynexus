@@ -50,6 +50,7 @@ PROFILE = {
     "Eastern Mediterranean": (120, 14, 0.22), "Baltic Sea": (110, 16, 0.02),
     "Horn of Africa": (50, 8, 0.08), "Bay of Bengal": (100, 20, 0.06),
     "Caribbean": (130, 15, 0.16), "Gulf of Guinea": (70, 12, 0.02),
+    "India-Pakistan Border": (180, 10, 0.20),
 }
 
 # (region, hours_back_start, multiplier) applied to traffic for the latest hours
@@ -75,6 +76,7 @@ QUAKE_PLACES = {
     "Caribbean": (18.3, -66.9), "South China Sea": (13.5, 119.8),
     "Black Sea": (40.9, 30.8), "Middle East": (27.5, 54.0), "Red Sea": (17.5, 40.8),
     "Horn of Africa": (11.6, 43.1), "Bay of Bengal": (20.5, 92.5),
+    "India-Pakistan Border": (31.5, 74.3),
 }
 
 # (name prefix, category, count, inclination, mean motion rev/day, ecc, first NORAD)

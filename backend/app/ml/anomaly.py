@@ -37,11 +37,12 @@ logger = logging.getLogger("anomaly")
 
 FEATURES = ["aircraft_per_hour", "storm_index", "event_count"]
 LOOKBACK_HOURS = 6
-MIN_BASELINE_ROWS = 24
-STORE_THRESHOLD = 50.0
-MIN_Z = 2.0  # or an Isolation Forest score >= 85
-Z_WEIGHT = 0.5
-IFOREST_WEIGHT = 0.5
+MIN_BASELINE_ROWS = 6
+STORE_THRESHOLD = 40.0
+MIN_Z = 1.5
+Z_WEIGHT = 0.35
+NORM_WEIGHT = 0.35
+IFOREST_WEIGHT = 0.30
 
 
 def severity_for(score: float) -> str:
@@ -49,7 +50,7 @@ def severity_for(score: float) -> str:
         return "high"
     if score >= 65:
         return "medium"
-    if score >= 50:
+    if score >= 40:
         return "low"
     return "normal"
 
@@ -72,14 +73,22 @@ def score_region(rs: RegionSeries) -> list[dict]:
         return []
     cutoff = end_idx - 24
     base_mask = np.array([i < cutoff for i in idx])
+    # Adaptive baseline: if 24h+ prior baseline is building, use all prior completed hours
     if base_mask.sum() < MIN_BASELINE_ROWS:
-        return []
-    base = X[base_mask]
-    mean = base.mean(axis=0)
-    std = np.maximum(base.std(axis=0), np.maximum(0.1 * np.abs(mean), [1.0, 2.0, 0.5]))
+        base_mask = np.array([i < end_idx - LOOKBACK_HOURS for i in idx])
 
-    model = IsolationForest(n_estimators=150, contamination="auto", random_state=7)
-    model.fit(base)
+    # If still fewer than 4 hours of history, use available points with cautious floors
+    if base_mask.sum() < 4:
+        base = X if len(X) > 0 else np.array([[100.0, 10.0, 0.0]])
+        mean = base.mean(axis=0)
+        std = np.maximum(base.std(axis=0), np.maximum(0.15 * np.abs(mean), [5.0, 5.0, 1.0]))
+        model = None
+    else:
+        base = X[base_mask]
+        mean = base.mean(axis=0)
+        std = np.maximum(base.std(axis=0), np.maximum(0.10 * np.abs(mean), [2.0, 3.0, 0.5]))
+        model = IsolationForest(n_estimators=100, contamination="auto", random_state=7)
+        model.fit(base)
 
     recent = [(k, i) for k, i in enumerate(idx) if i >= end_idx - LOOKBACK_HOURS]
     out = []
@@ -87,21 +96,41 @@ def score_region(rs: RegionSeries) -> list[dict]:
         row = X[k]
         z = (row - mean) / std
         dom = int(np.argmax(np.abs(z)))
-        z_scaled = float(min(100.0, abs(z[dom]) / 3.0 * 100.0))
-        df = float(model.decision_function(row.reshape(1, -1))[0])
-        if_scaled = float(min(100.0, max(0.0, (0.1 - df) / 0.3 * 100.0)))
-        composite = Z_WEIGHT * z_scaled + IFOREST_WEIGHT * if_scaled
-        feature = FEATURES[dom]
+        z_dom = float(z[dom])
+        z_scaled = float(min(100.0, abs(z_dom) / 3.0 * 100.0))
+
+        # Multivariate compound deviation (L2 norm of feature deviations)
+        norm_z = float(np.linalg.norm(z))
+        norm_scaled = float(min(100.0, norm_z / 3.5 * 100.0))
+
+        if model is not None:
+            df = float(model.decision_function(row.reshape(1, -1))[0])
+            if_scaled = float(min(100.0, max(0.0, (0.15 - df) / 0.35 * 100.0)))
+        else:
+            if_scaled = norm_scaled
+
+        # Balanced compound anomaly score
+        composite = Z_WEIGHT * z_scaled + NORM_WEIGHT * norm_scaled + IFOREST_WEIGHT * if_scaled
+
+        # Multi-signal feature attribution
+        elevated_features = [FEATURES[idx_f] for idx_f, z_val in enumerate(z) if abs(z_val) >= 1.5]
+        if len(elevated_features) > 1:
+            feature = " & ".join(elevated_features)
+        else:
+            feature = FEATURES[dom]
+
         sev = severity_for(composite)
-        if dom == 0 and z[dom] < 0 and row[1] >= 50:
+        # Weather correlation check: if traffic drops during heavy weather, mark as weather-explained
+        if z[0] < -0.8 and row[1] >= 35.0:
             feature = "aircraft_per_hour (weather-explained)"
             sev = "low" if composite >= STORE_THRESHOLD else "normal"
+
         out.append({
             "region_id": rs.region_id,
             "timestamp": rs.hours[i] + timedelta(minutes=30),
             "feature_name": feature,
             "observed_value": float(row[dom]),
-            "z_score": round(float(z[dom]), 2),
+            "z_score": round(z_dom, 2),
             "isolation_forest_score": round(if_scaled, 1),
             "composite_score": round(composite, 1),
             "severity_label": sev,
@@ -124,7 +153,7 @@ def run_anomaly_detection(db: Session) -> int:
                 "DELETE FROM anomaly_scores WHERE region_id = :rid AND timestamp = :ts"
             ), {"rid": r["region_id"], "ts": r["timestamp"]})
             if r["composite_score"] < STORE_THRESHOLD or (
-                abs(r["z_score"]) < MIN_Z and r["isolation_forest_score"] < 85
+                abs(r["z_score"]) < MIN_Z and r["isolation_forest_score"] < 70
             ):
                 continue
             db.execute(text(
@@ -148,6 +177,8 @@ def describe(row: dict) -> str:
     feat = row["feature_name"]
     z = row.get("z_score") or 0
     direction = "above" if z > 0 else "below"
+    if "&" in feat:
+        return f"Compound anomaly ({feat}) with |z|={abs(z):.1f}"
     if feat.startswith("aircraft"):
         base = f"Air traffic {abs(z):.1f} standard deviations {direction} normal"
         return base + (", during a storm" if "weather" in feat else "")

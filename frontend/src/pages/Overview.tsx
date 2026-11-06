@@ -9,6 +9,7 @@ import { go } from '../lib/router';
 import { useSetStore, watchlist } from '../lib/store';
 import { usePoll } from '../lib/usePoll';
 import RegionPanel from '../components/RegionPanel';
+import FlightPanel from '../components/FlightPanel';
 import { Diamond, Empty, ErrorNote, Skeleton, Sparkline, Swatch } from '../components/ui';
 
 interface Props {
@@ -50,10 +51,14 @@ export default function Overview({ regions, regionsError, outlines, selectedId }
   const events = usePoll(() => api.events({ days: 7 }), 120_000);
   const [layers, setLayers] = useState<Layers>({ aircraft: true, satellites: true, events: true, outlines: true });
   const [filter, setFilter] = useState<'all' | 'watch'>('all');
+  const [selectedFlightIcao, setSelectedFlightIcao] = useState<string | null>(null);
   const watched = useSetStore(watchlist);
 
   const selected = regions?.find((r) => r.region_id === selectedId) ?? null;
-  const select = (id: string | null) => go('overview', id);
+  const select = (id: string | null) => {
+    setSelectedFlightIcao(null);
+    go('overview', id);
+  };
 
   const globeRegions: GlobeRegion[] = useMemo(() => {
     if (!outlines || !regions) return [];
@@ -67,10 +72,16 @@ export default function Overview({ regions, regionsError, outlines, selectedId }
     });
   }, [outlines, regions]);
 
-  const gFlights: GlobeFlight[] = useMemo(() => (flights.data ?? []).map((f) => ({
-    id: f.icao24, lat: f.lat, lon: f.lon, heading: f.heading_deg,
-    label: `${f.callsign.trim() || f.icao24}, ${fmtNum(f.altitude_ft)} ft, ${fmtNum(f.speed_kt)} kt`,
-  })), [flights.data]);
+  const gFlights: GlobeFlight[] = useMemo(() => (flights.data ?? []).map((f) => {
+    const routeStr = f.route ? ` (${f.route.origin_iata} → ${f.route.dest_iata})` : '';
+    const devStr = f.deviation
+      ? ` • ${Math.abs(f.deviation.cross_track_km)} km ${f.deviation.side} (${f.deviation.status.replace('_', ' ')})`
+      : '';
+    return {
+      id: f.icao24, lat: f.lat, lon: f.lon, heading: f.heading_deg,
+      label: `${f.callsign.trim() || f.icao24}${routeStr}${devStr}, ${fmtNum(f.altitude_ft)} ft, ${fmtNum(f.speed_kt)} kt`,
+    };
+  }), [flights.data]);
   const gSats: GlobeSat[] = useMemo(() => (sats.data ?? []).map((s) => ({
     id: s.norad_id, lat: s.lat, lon: s.lon, label: `${s.name}, ${fmtNum(s.altitude_km)} km`,
   })), [sats.data]);
@@ -120,7 +131,8 @@ export default function Overview({ regions, regionsError, outlines, selectedId }
       <section className="panel globewrap" aria-label="Globe">
         <Globe regions={globeRegions} flights={gFlights} sats={gSats} events={gEvents} layers={layers}
           selectedRegion={selectedId} selectedSat={null} focus={focus}
-          onSelectRegion={(id) => select(id)} onSelectSat={(id) => go('satellites', id)} />
+          onSelectRegion={(id) => select(id)} onSelectSat={(id) => go('satellites', id)}
+          onSelectFlight={(icao) => { setSelectedFlightIcao(icao); if (selectedId) select(null); }} />
         <div className="legend" aria-label="Legend">
           {LEGEND.map((l) => <div key={l.label}><Swatch level={l.level} />{l.label}</div>)}
           <div className="legend-sep" />
@@ -142,22 +154,29 @@ export default function Overview({ regions, regionsError, outlines, selectedId }
             Regions
           </button>
         </div>
-        <p className="globe-hint">Drag to rotate, scroll to zoom, click a region or satellite.</p>
+        <p className="globe-hint">Drag to rotate, scroll to zoom, click an aircraft, region, or satellite.</p>
       </section>
 
       <section className="panel ov-right" aria-label="Details">
-        {selected ? (
+        {selectedFlightIcao ? (
+          <FlightPanel icao24={selectedFlightIcao} onClose={() => setSelectedFlightIcao(null)} />
+        ) : selected ? (
           <RegionPanel key={selected.region_id} region={selected} onClose={() => select(null)} />
         ) : (
-          <WorldPanel regions={regions} events={events.data} />
+          <WorldPanel regions={regions} events={events.data} onSelectFlight={(icao) => setSelectedFlightIcao(icao)} />
         )}
       </section>
     </div>
   );
 }
 
-function WorldPanel({ regions, events }: { regions: Region[] | null; events: { id: string; magnitude: number; description: string | null; event_type: string; event_date: string; region_name: string }[] | null }) {
+function WorldPanel({ regions, events, onSelectFlight }: {
+  regions: Region[] | null;
+  events: { id: string; magnitude: number; description: string | null; event_type: string; event_date: string; region_name: string }[] | null;
+  onSelectFlight?: (icao: string) => void;
+}) {
   const anomalies = usePoll(() => api.anomalies({ hours: 24 }), 120_000);
+  const deviations = usePoll(() => api.flightDeviations(50), 30_000);
   const movers = (regions ?? [])
     .filter((r) => r.change_24h !== null)
     .sort((a, b) => Math.abs(b.change_24h!) - Math.abs(a.change_24h!))
@@ -177,6 +196,20 @@ function WorldPanel({ regions, events }: { regions: Region[] | null; events: { i
             <span className="num">{Math.round(r.change_24h!) > 0 ? '+' : ''}{Math.round(r.change_24h!) || 0}</span>
           </button>
         )) : <p className="muted small m0">Comparisons appear after two days of data.</p>}
+      </div>
+      <div className="sec">
+        <h4>Route deviations (&gt; 50 km)</h4>
+        {deviations.data?.length ? deviations.data.slice(0, 5).map((f) => (
+          <button key={f.icao24} className="mover" onClick={() => onSelectFlight?.(f.icao24)}>
+            <span className={`sev-dot s-${f.deviation?.status === 'significant_deviation' ? 'high' : 'medium'}`} aria-hidden="true" />
+            <span style={{ flex: 1, textAlign: 'left' }}>
+              <b className="w550">{f.callsign || f.icao24}</b> {f.route ? `(${f.route.origin_iata} → ${f.route.dest_iata})` : ''}
+            </span>
+            <span className="num">
+              {Math.abs(f.deviation?.cross_track_km ?? 0)} km {f.deviation?.side}
+            </span>
+          </button>
+        )) : <p className="muted small m0">{deviations.data ? 'All monitored aircraft on route corridor.' : 'Loading…'}</p>}
       </div>
       <div className="sec">
         <h4>Unusual hours, last 24 h</h4>

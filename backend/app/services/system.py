@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.services import ingest
 
 SOURCES = {
+    "opensky": ("Air traffic", "OpenSky Network worldwide live ADS-B vectors", "https://opensky-network.org"),
     "adsb.lol": ("Air traffic", "ADS-B aircraft positions", "https://adsb.lol"),
     "celestrak": ("Satellites", "Orbital elements (TLE), positioned with SGP4", "https://celestrak.org"),
     "open-meteo": ("Weather", "Wind, gusts and rain at each region centre", "https://open-meteo.com"),

@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.ml.anomaly import score_region as anomaly_rows
-from app.services.disruption import event_component, flight_component, weather_component
+from app.services.disruption import event_component, flight_component, satellite_component, weather_component
 from app.services.series import RegionSeries
 
 NOW = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
@@ -82,3 +82,56 @@ def test_anomaly_engine_marks_storm_drop_weather_explained():
     assert hit
     assert all(r["severity_label"] in ("low", "normal") or "weather" in r["feature_name"]
                or r["feature_name"] == "storm_index" for r in hit)
+
+
+def test_weekly_flight_deviation_metrics():
+    a = flat(100.0)
+    a[-4:-1] = [50.0] * 3  # 50% drop
+    f = flight_component(series(a), len(HOURS) - 1)
+    assert f["week_mean"] == 100.0
+    assert f["week_pct_change"] < -40.0
+    assert f["score"] > 30.0
+
+
+def test_satellite_component_density_and_orbits():
+    empty = satellite_component(None)
+    assert empty["score"] == 0.0 and empty["count"] == 0
+
+    # Normal constellation with healthy GNSS navigation
+    normal_sat = {
+        "count": 6, "density": 8.5,
+        "by_orbit": {"leo": 4, "meo": 2, "geo": 0},
+        "by_category": {"Earth observation": 1, "Navigation": 2, "Communications": 3},
+        "leo_earthobs": 1, "gnss_nav": 2,
+    }
+    s_norm = satellite_component(normal_sat)
+    assert s_norm["score"] <= 30.0
+    assert s_norm["gnss_nav"] == 2
+
+    # High surveillance LEO activity
+    surge_sat = {
+        "count": 12, "density": 25.0,
+        "by_orbit": {"leo": 10, "meo": 2, "geo": 0},
+        "by_category": {"Earth observation": 4, "Navigation": 2},
+        "leo_earthobs": 4, "gnss_nav": 2,
+    }
+    s_surge = satellite_component(surge_sat)
+    assert s_surge["score"] > 50.0
+    assert s_surge["leo_earthobs"] == 4
+
+
+def test_flight_route_deviation_increases_disruption_index():
+    rs = series(flat())
+    # Normal traffic with no deviation scores 0
+    f_nom = flight_component(rs, len(HOURS) - 1, dev_info=None)
+    assert f_nom["score"] == 0.0
+
+    # Traffic with high route deviations (e.g. 2 aircraft deviating 250 km)
+    dev_info = {
+        "count": 5, "deviating_count": 2, "significant_count": 2, "minor_count": 0,
+        "max_km": 250.0, "avg_km": 240.0, "dev_score": 100.0,
+    }
+    f_dev = flight_component(rs, len(HOURS) - 1, dev_info=dev_info)
+    assert f_dev["score"] >= 75.0
+    assert f_dev["route_deviations"]["significant_count"] == 2
+

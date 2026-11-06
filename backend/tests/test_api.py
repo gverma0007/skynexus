@@ -31,7 +31,7 @@ def test_health(client):
 
 def test_regions_have_scores(client):
     regions = client.get("/api/regions").json()
-    assert len(regions) == 15
+    assert len(regions) >= 15
     for r in regions:
         assert 0 <= r["composite_index"] <= 100
         assert r["status"] in ("Calm", "Watch", "Elevated", "Critical")
@@ -45,7 +45,7 @@ def test_pacific_does_not_cover_gulf_of_guinea(client):
 
 def test_region_endpoints(client):
     rid = client.get("/api/regions").json()[0]["region_id"]
-    for path in ("", "/history", "/overhead", "/forecast"):
+    for path in ("", "/history", "/overhead", "/forecast", "/analysis"):
         assert client.get(f"/api/regions/{rid}{path}").status_code == 200
 
 
@@ -60,9 +60,22 @@ def test_report_round_trip(client):
 
 
 def test_misc_endpoints(client):
-    for path in ("/api/stats", "/api/flights/live", "/api/satellites/live", "/api/events",
+    for path in ("/api/stats", "/api/flights/live", "/api/flights/deviations", "/api/satellites/live", "/api/events",
                  "/api/anomalies", "/api/alerts", "/api/system/health", "/api/system/mode", "/api/search?q=a"):
         assert client.get(path).status_code == 200, path
+
+
+def test_flight_route_deviation(client):
+    flights = client.get("/api/flights/live").json()
+    if flights:
+        icao = flights[0]["icao24"]
+        res = client.get(f"/api/flights/{icao}/route")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["icao24"] == icao
+        if body["route"]:
+            assert "waypoints" in body["route"]
+            assert body["deviation"]["status"] in ("on_route", "minor_deviation", "significant_deviation")
 
 
 def test_system_mode_toggle(client):

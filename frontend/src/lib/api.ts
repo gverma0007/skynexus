@@ -12,6 +12,19 @@ export interface FlightComponent {
   z: number | null;
   direction: 'up' | 'down' | 'flat';
   baseline_days: number;
+  week_mean?: number | null;
+  week_pct_change?: number | null;
+  week_z?: number | null;
+}
+
+export interface SatelliteComponent {
+  score: number;
+  count: number;
+  density: number;
+  by_orbit: { leo: number; meo: number; geo: number };
+  by_category: Record<string, number>;
+  leo_earthobs: number;
+  gnss_nav: number;
 }
 
 export interface EventBrief {
@@ -36,10 +49,12 @@ export interface Region {
   flight_anomaly_score: number;
   event_relevance_score: number;
   weather_score: number;
+  satellite_score?: number;
   components: {
     flights: FlightComponent;
     events: { score: number; count_24h: number; max_magnitude: number | null; largest: EventBrief | null };
     weather: { score: number; storm_now: number | null; storm_week_avg: number | null };
+    satellites?: SatelliteComponent;
   };
   explanation: string[];
   sparkline: (number | null)[];
@@ -124,6 +139,23 @@ export interface SatelliteDetail {
   track: { time: string; lat: number; lon: number; alt_km: number; offset_min: number }[];
 }
 
+export interface FlightDeviation {
+  cross_track_km: number;
+  cross_track_nm: number;
+  side: 'right' | 'left';
+  heading_deviation_deg: number;
+  progress_pct: number;
+  total_route_km: number;
+  status: 'on_route' | 'minor_deviation' | 'significant_deviation';
+}
+
+export interface FlightRouteSummary {
+  origin_iata: string;
+  origin_name: string;
+  dest_iata: string;
+  dest_name: string;
+}
+
 export interface Flight {
   icao24: string;
   callsign: string;
@@ -136,6 +168,19 @@ export interface Flight {
   source: string;
   region_id: string | null;
   region_name: string | null;
+  route?: FlightRouteSummary | null;
+  deviation?: FlightDeviation | null;
+}
+
+export interface FlightDetail extends Omit<Flight, 'route'> {
+  summary?: string;
+  route?: {
+    origin: { iata: string; name: string; lat: number; lon: number };
+    dest: { iata: string; name: string; lat: number; lon: number };
+    waypoints: { lat: number; lon: number }[];
+    total_route_km: number;
+  } | null;
+  trail: { lat: number; lon: number; altitude_ft: number; speed_kt: number; timestamp: string }[];
 }
 
 export interface EventItem {
@@ -210,12 +255,25 @@ export interface Report {
   windows: { before_start: string; before_end: string; after_start: string; after_end: string };
   disruption_index: { before: number | null; after: number; delta: number | null };
   aviation_metrics: MetricDelta;
+  flight_deviations?: {
+    label: string;
+    active_routes: number;
+    deviating_flights: number;
+    significant_deviations: number;
+    max_deviation_km: number;
+    avg_deviation_km: number;
+    deviation_score: number;
+  };
   events_metrics: MetricDelta & {
     largest: string | null;
     list: { description: string | null; magnitude: number; event_date: string }[];
   };
   weather_metrics: MetricDelta;
   satellite_metrics: MetricDelta;
+  historical_data?: {
+    baseline_hours: number;
+    points: HistoryPoint[];
+  };
   confidence_pct: number;
   overall_assessment: string;
   ai_source: 'claude' | 'template';
@@ -318,6 +376,8 @@ export const api = {
   overhead: (id: string) => request<Overhead>(`/regions/${id}/overhead`),
   forecast: (id: string) => request<Forecast>(`/regions/${id}/forecast`),
   flights: (limit = 3000) => request<Flight[]>(`/flights/live${q({ limit })}`),
+  flightDetail: (icao24: string) => request<FlightDetail>(`/flights/${icao24}/route`),
+  flightDeviations: (minKm = 50) => request<Flight[]>(`/flights/deviations?min_km=${minKm}`),
   satellites: () => request<Satellite[]>('/satellites/live'),
   satellite: (norad: number) => request<SatelliteDetail>(`/satellites/${norad}`),
   events: (p: { region_id?: string; days?: number; min_magnitude?: number } = {}) =>
