@@ -40,6 +40,7 @@ if [ "$MODE" = "demo" ]; then
 else
   echo "[skynexus] live mode: removing any demo rows"
   python -m app.data.seed_airports --purge-synthetic
+  python -m app.data.seed_satellites
 fi
 
 PORT="${PORT:-8000}"

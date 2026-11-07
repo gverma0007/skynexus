@@ -320,7 +320,7 @@ def _fetch_group_tles(
     """Fetch (name, norad, l1, l2, category) from Celestrak groups, cached 12h."""
     combined: list[tuple[str, int, str, str, str]] = []
     seen: set[int] = set()
-    client = httpx.Client(timeout=30, headers=UA)
+    client = httpx.Client(timeout=8, headers=UA)
     try:
         for group, (take, category) in max_per_group.items():
             cache = CACHE_DIR / f"group_{group}.txt"
@@ -381,7 +381,12 @@ def fetch_satellite_positions(db: Session, steps: int = 6, step_minutes: int = 1
     from sgp4.api import Satrec
 
     catalog = _fetch_group_tles(SATELLITE_GROUPS)
-    logger.info("Tracking %d satellites from %d groups", len(catalog), len(SATELLITE_GROUPS))
+    if not catalog:
+        stored = db.execute(text("SELECT name, norad_id, tle_line1, tle_line2, COALESCE(category, 'other') FROM satellites")).all()
+        catalog = [(r[0], r[1], r[2], r[3], r[4]) for r in stored if r[2] and r[3]]
+        logger.info("Celestrak offline or empty; fell back to %d stored satellites", len(catalog))
+    else:
+        logger.info("Tracking %d satellites from %d groups", len(catalog), len(SATELLITE_GROUPS))
 
     total = 0
     now = datetime.now(timezone.utc)
@@ -429,7 +434,7 @@ def fetch_satellite_positions(db: Session, steps: int = 6, step_minutes: int = 1
                 )
             )
             total += 1
-        db.commit()
+    db.commit()
     return total
 
 
