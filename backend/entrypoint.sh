@@ -6,13 +6,17 @@ echo "[skynexus] waiting for the database..."
 python - <<'PY'
 import os, sys, time
 import psycopg2
-url = os.environ.get("DATABASE_URL", "postgresql://user:password@db:5432/skynexus")
+url = os.environ.get("DATABASE_URL")
+if not url:
+    print("[skynexus] FATAL: DATABASE_URL environment variable is not set!", flush=True)
+    sys.exit(1)
 for attempt in range(60):
     try:
         psycopg2.connect(url).close()
+        print("[skynexus] database connection successful!", flush=True)
         sys.exit(0)
     except Exception as exc:
-        print(f"  not ready ({exc.__class__.__name__}), retrying...", flush=True)
+        print(f"  database not ready ({exc.__class__.__name__}: {exc}), retrying...", flush=True)
         time.sleep(2)
 sys.exit("database never became available")
 PY
@@ -38,5 +42,6 @@ else
   python -m app.data.seed_airports --purge-synthetic
 fi
 
-echo "[skynexus] starting API on :8000 (data mode: $MODE)"
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
+PORT="${PORT:-8000}"
+echo "[skynexus] starting API on :$PORT (data mode: $MODE)"
+exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --proxy-headers
