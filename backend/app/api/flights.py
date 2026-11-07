@@ -15,7 +15,7 @@ def live_flights(limit: int = Query(3000, le=10000), db: Session = Depends(get_d
 
 
 @router.get("/deviations")
-def flight_deviations(min_km: float = Query(50.0, ge=0.0), limit: int = Query(50, le=200), db: Session = Depends(get_db)):
+def flight_deviations(min_km: float | None = Query(None, ge=0.0), limit: int = Query(50, le=200), db: Session = Depends(get_db)):
     """All live flights with cross-track deviation exceeding min_km from general travel route."""
     return get_flight_deviations(db, min_deviation_km=min_km, limit=limit)
 

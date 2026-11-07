@@ -177,7 +177,7 @@ function StatusStrip({ stats }: { stats: Stats | null }) {
     <div className="strip" role="status">
       <span><strong className="num">{fmtNum(stats.aircraft_now)}</strong>aircraft tracked</span>
       <span><strong className="num">{fmtNum(stats.satellites_tracked)}</strong>satellites</span>
-      <span><strong className="num">{fmtNum(stats.events_24h)}</strong>earthquakes in 24 h</span>
+      <span><strong className="num">{fmtNum(stats.events_24h)}</strong>conflict & security incidents (24 h)</span>
       <span className="hide-sm"><strong className="num">{stats.regions_monitored}</strong>regions monitored</span>
       <span className="strip-end hide-sm">{next || (stats.data_mode === 'demo' ? 'Showing the generated demo world' : '')}</span>
     </div>

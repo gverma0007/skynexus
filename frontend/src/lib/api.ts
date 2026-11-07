@@ -3,6 +3,16 @@
 export type Severity = 'normal' | 'low' | 'medium' | 'high';
 export type Status = 'Calm' | 'Watch' | 'Elevated' | 'Critical';
 
+export interface RouteDeviationsInfo {
+  count?: number;
+  deviating_count?: number;
+  minor_count?: number;
+  significant_count?: number;
+  max_km?: number;
+  avg_km?: number;
+  dev_score?: number;
+}
+
 export interface FlightComponent {
   score: number;
   warming_up: boolean;
@@ -15,12 +25,14 @@ export interface FlightComponent {
   week_mean?: number | null;
   week_pct_change?: number | null;
   week_z?: number | null;
+  route_deviations?: RouteDeviationsInfo;
 }
 
 export interface SatelliteComponent {
   score: number;
   count: number;
   density: number;
+  density_change_pct?: number | null;
   by_orbit: { leo: number; meo: number; geo: number };
   by_category: Record<string, number>;
   leo_earthobs: number;
@@ -377,7 +389,7 @@ export const api = {
   forecast: (id: string) => request<Forecast>(`/regions/${id}/forecast`),
   flights: (limit = 3000) => request<Flight[]>(`/flights/live${q({ limit })}`),
   flightDetail: (icao24: string) => request<FlightDetail>(`/flights/${icao24}/route`),
-  flightDeviations: (minKm = 50) => request<Flight[]>(`/flights/deviations?min_km=${minKm}`),
+  flightDeviations: (minKm = 300) => request<Flight[]>(`/flights/deviations?min_km=${minKm}`),
   satellites: () => request<Satellite[]>('/satellites/live'),
   satellite: (norad: number) => request<SatelliteDetail>(`/satellites/${norad}`),
   events: (p: { region_id?: string; days?: number; min_magnitude?: number } = {}) =>

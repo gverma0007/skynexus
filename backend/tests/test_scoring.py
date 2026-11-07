@@ -8,10 +8,15 @@ NOW = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
 HOURS = [NOW - timedelta(hours=h) for h in range(191, -1, -1)]
 
 
-def series(aircraft, storm=None, events=None):
+def series(aircraft=None, storm=None, events=None, satellites=None, flight_deviations=None):
     n = len(HOURS)
-    return RegionSeries("r1", "Test", 0.0, 0.0, HOURS, list(aircraft),
-                        list(storm or [10.0] * n), list(events or [0] * n), [0.0] * n)
+    a = list(aircraft if aircraft is not None else [50.0] * n)
+    s = list(storm if storm is not None else [10.0] * n)
+    e = list(events if events is not None else [0] * n)
+    sat = list(satellites if satellites is not None else [10.0] * n)
+    dev = list(flight_deviations if flight_deviations is not None else [0.0] * n)
+    return RegionSeries("r1", "Test", 0.0, 0.0, HOURS, a, s, e, [0.0] * n,
+                        satellites=sat, flight_deviations=dev)
 
 
 def flat(v=50.0):
@@ -24,14 +29,18 @@ def test_normal_traffic_scores_zero():
     assert f["score"] == 0 and f["warming_up"] is False
 
 
-def test_surge_and_drop_both_score():
+def test_traffic_volume_change_does_not_score_anomaly_without_route_deviation():
     up = flat(); up[-4:-1] = [90.0] * 3
     down = flat(); down[-4:-1] = [10.0] * 3
     fu = flight_component(series(up), len(HOURS) - 1)
     fd = flight_component(series(down), len(HOURS) - 1)
-    assert fu["score"] > 50 and fu["direction"] == "up"
-    assert fd["score"] > 50 and fd["direction"] == "down"
+    # Direction and pct_change are tracked for statistics
+    assert fu["direction"] == "up"
+    assert fd["direction"] == "down"
     assert fd["pct_change"] < -50
+    # But anomaly score is 0 without route deviation
+    assert fu["score"] == 0
+    assert fd["score"] == 0
 
 
 def test_missing_baseline_is_warming_up_not_anomalous():
@@ -51,7 +60,7 @@ def test_ingest_gaps_are_ignored():
 
 def test_event_points_decay_and_background():
     big = {"id": "e", "magnitude": 5.8, "event_date": NOW - timedelta(hours=2),
-           "description": "M5.8 earthquake — x", "event_type": "Earthquake"}
+           "description": "Security alert — x", "event_type": "Conflict Incident"}
     old = dict(big, event_date=NOW - timedelta(hours=23))
     assert event_component([big], NOW)["score"] > event_component([old], NOW)["score"]
     assert event_component([], NOW)["score"] == 0
@@ -64,24 +73,57 @@ def test_weather_uses_latest_reading():
     assert w["score"] == 65.0
 
 
-def test_anomaly_engine_flags_injected_spike():
+def test_anomaly_engine_flags_satellite_and_route_deviation_spikes():
+    # 1. Aeroplane density changes alone do NOT trigger anomaly
     a = [50.0 + (i % 5) for i in range(len(HOURS))]
     a[-3] = 140.0
-    rows = anomaly_rows(series(a))
-    spike = [r for r in rows if r["observed_value"] == 140.0]
-    assert spike and spike[0]["composite_score"] >= 60
-    assert spike[0]["feature_name"] == "aircraft_per_hour"
+    rows_air = anomaly_rows(series(a))
+    assert not any(r["observed_value"] == 140.0 for r in rows_air)
+
+    # 2. Seismic earthquake logic is completely excluded from anomaly feature naming
+    ev = [0] * len(HOURS)
+    ev[-3] = 25  # 25 incidents in an hour
+    rows_ev = anomaly_rows(series(events=ev))
+    assert not any("event" in r["feature_name"] or "earthquake" in r["feature_name"] for r in rows_ev)
+
+    # 3. Satellite density spike triggers satellite_density anomaly
+    sats = [10.0] * len(HOURS)
+    sats[-3] = 45.0
+    rows_sat = anomaly_rows(series(satellites=sats))
+    spike_sat = [r for r in rows_sat if r["observed_value"] == 45.0]
+    assert spike_sat and spike_sat[0]["composite_score"] >= 50
+    assert spike_sat[0]["feature_name"] in ("satellite_density", "orbital_reconnaissance_surge")
+
+    # 4. Flight route deviation spike triggers flight_route_deviation anomaly
+    devs = [15.0] * len(HOURS)
+    devs[-3] = 320.0
+    rows_dev = anomaly_rows(series(flight_deviations=devs))
+    spike_dev = [r for r in rows_dev if r["observed_value"] == 320.0]
+    assert spike_dev and spike_dev[0]["composite_score"] >= 50
+    assert spike_dev[0]["feature_name"] in ("flight_route_deviation", "airspace_conflict_evasion")
 
 
-def test_anomaly_engine_marks_storm_drop_weather_explained():
-    a = flat()
+def test_anomaly_engine_marks_storm_deviation_weather_explained():
+    devs = [15.0] * len(HOURS)
     storm = [10.0] * len(HOURS)
-    a[-3], storm[-3] = 5.0, 80.0
-    rows = anomaly_rows(series(a, storm=storm))
-    hit = [r for r in rows if r["observed_value"] in (5.0, 80.0)]
+    devs[-3], storm[-3] = 120.0, 80.0
+    rows = anomaly_rows(series(flight_deviations=devs, storm=storm))
+    hit = [r for r in rows if r["observed_value"] in (120.0, 80.0)]
     assert hit
-    assert all(r["severity_label"] in ("low", "normal") or "weather" in r["feature_name"]
-               or r["feature_name"] == "storm_index" for r in hit)
+    assert any("weather" in r["feature_name"] or r["severity_label"] in ("low", "normal") for r in hit)
+
+
+def test_anomaly_engine_detects_war_conflict_early_warning():
+    # Coincident satellite surveillance surge + flight route avoidance in clear weather
+    sats = [10.0] * len(HOURS); sats[-3] = 40.0
+    devs = [15.0] * len(HOURS); devs[-3] = 310.0
+    storm = [5.0] * len(HOURS)
+    rows = anomaly_rows(series(satellites=sats, flight_deviations=devs, storm=storm))
+    war_hit = [r for r in rows if "war_conflict" in r["feature_name"]]
+    assert war_hit, f"Expected war_conflict_early_warning, got: {[r['feature_name'] for r in rows]}"
+    assert war_hit[0]["severity_label"] in ("high", "medium")
+    # Verified war & conflict risk is directly included in composite score
+    assert war_hit[0]["composite_score"] >= 60.0
 
 
 def test_weekly_flight_deviation_metrics():
@@ -90,7 +132,8 @@ def test_weekly_flight_deviation_metrics():
     f = flight_component(series(a), len(HOURS) - 1)
     assert f["week_mean"] == 100.0
     assert f["week_pct_change"] < -40.0
-    assert f["score"] > 30.0
+    # Flight anomaly score remains 0 without route deviations
+    assert f["score"] == 0.0
 
 
 def test_satellite_component_density_and_orbits():
@@ -134,4 +177,3 @@ def test_flight_route_deviation_increases_disruption_index():
     f_dev = flight_component(rs, len(HOURS) - 1, dev_info=dev_info)
     assert f_dev["score"] >= 75.0
     assert f_dev["route_deviations"]["significant_count"] == 2
-

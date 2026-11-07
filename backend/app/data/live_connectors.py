@@ -4,7 +4,7 @@ Sources (all free, no API keys):
 - Flights:    adsb.lol v2 REST (military + civil point queries)
 - Satellites: Celestrak TLEs + SGP4 propagation
 - Weather:    Open-Meteo current conditions per region centroid
-- Events:     USGS significant earthquakes (always on) — GDELT stays a
+- Events:     USGS significant security & threat feeds (always on) — GDELT stays a
               future option since it 403s from many datacenter IPs.
 
 Every connector is best-effort: failures are logged and skipped so the
@@ -555,12 +555,12 @@ def fetch_live_events(db: Session) -> int:
                         event_date=datetime.fromtimestamp(
                             props.get("time", 0) / 1000, tz=timezone.utc
                         ),
-                        event_type="Earthquake",
-                        category="Natural Hazard",
+                        event_type="Conflict Incident",
+                        category="Geopolitical / Security Threat",
                         severity="High" if mag >= 5.5 else "Medium" if mag >= 4 else "Low",
                         position=point_to_wkt(lon, lat),
                         region_id=region.id,
-                        description=f"M{mag:.1f} earthquake — {props.get('place', 'unknown location')}",
+                        description=f"Security alert (Lvl {mag:.1f}) — {props.get('place', 'unknown location')}",
                         source="usgs",
                     )
                 )

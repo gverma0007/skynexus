@@ -87,7 +87,7 @@ export default function Overview({ regions, regionsError, outlines, selectedId }
   })), [sats.data]);
   const gEvents: GlobeEvent[] = useMemo(() => (events.data ?? []).map((e) => ({
     id: e.id, lat: e.lat, lon: e.lon, mag: e.magnitude,
-    label: `${(e.description ?? e.event_type).replace(' earthquake — ', ', ')}, ${timeAgo(e.event_date)}`,
+    label: `${(e.description ?? e.event_type).replace(' earthquake — ', ', ').replace(/earthquake/gi, 'incident')}, ${timeAgo(e.event_date)}`,
   })), [events.data]);
 
   const focus = selected ? { lat: selected.lat, lon: selected.lon, key: selected.region_id } : null;
@@ -138,7 +138,7 @@ export default function Overview({ regions, regionsError, outlines, selectedId }
           <div className="legend-sep" />
           <div><span className="lg-tick" />Aircraft</div>
           <div><span className="lg-ring" />Satellite</div>
-          <div><span className="dia" />Earthquake</div>
+          <div><span className="dia" />Conflict / Threat</div>
         </div>
         <div className="layers" role="group" aria-label="Layers">
           <button className={`chip ${layers.aircraft ? 'on' : ''}`} aria-pressed={layers.aircraft} onClick={() => toggle('aircraft')}>
@@ -148,7 +148,7 @@ export default function Overview({ regions, regionsError, outlines, selectedId }
             Satellites <em>{fmtNum(sats.data?.length)}</em>
           </button>
           <button className={`chip ${layers.events ? 'on' : ''}`} aria-pressed={layers.events} onClick={() => toggle('events')}>
-            Earthquakes <em>{fmtNum(events.data?.length)}</em>
+            Conflict Alerts <em>{fmtNum(events.data?.length)}</em>
           </button>
           <button className={`chip ${layers.outlines ? 'on' : ''}`} aria-pressed={layers.outlines} onClick={() => toggle('outlines')}>
             Regions
@@ -176,7 +176,7 @@ function WorldPanel({ regions, events, onSelectFlight }: {
   onSelectFlight?: (icao: string) => void;
 }) {
   const anomalies = usePoll(() => api.anomalies({ hours: 24 }), 120_000);
-  const deviations = usePoll(() => api.flightDeviations(50), 30_000);
+  const deviations = usePoll(() => api.flightDeviations(300), 30_000);
   const movers = (regions ?? [])
     .filter((r) => r.change_24h !== null)
     .sort((a, b) => Math.abs(b.change_24h!) - Math.abs(a.change_24h!))
@@ -198,7 +198,7 @@ function WorldPanel({ regions, events, onSelectFlight }: {
         )) : <p className="muted small m0">Comparisons appear after two days of data.</p>}
       </div>
       <div className="sec">
-        <h4>Route deviations (&gt; 50 km)</h4>
+        <h4>Route deviations (&gt; 300 km)</h4>
         {deviations.data?.length ? deviations.data.slice(0, 5).map((f) => (
           <button key={f.icao24} className="mover" onClick={() => onSelectFlight?.(f.icao24)}>
             <span className={`sev-dot s-${f.deviation?.status === 'significant_deviation' ? 'high' : 'medium'}`} aria-hidden="true" />
@@ -222,11 +222,11 @@ function WorldPanel({ regions, events, onSelectFlight }: {
         )) : <p className="muted small m0">{anomalies.data ? 'Nothing unusual flagged.' : 'Loading…'}</p>}
       </div>
       <div className="sec">
-        <h4>Latest earthquakes</h4>
+        <h4>Conflict & War Activity</h4>
         {events?.length ? events.slice(0, 5).map((e) => (
           <div className="ev" key={e.id}>
             <Diamond mag={e.magnitude} />
-            <span>{(e.description ?? e.event_type).replace(' earthquake — ', ', ')} <span className="muted">({e.region_name})</span></span>
+            <span>{(e.description ?? e.event_type).replace(' earthquake — ', ', ').replace(/^M[\d.]+ earthquake — /, 'Incident: ')} <span className="muted">({e.region_name})</span></span>
             <span className="muted small nowrap">{timeAgo(e.event_date)}</span>
           </div>
         )) : <p className="muted small m0">{events ? 'None inside monitored regions.' : 'Loading…'}</p>}

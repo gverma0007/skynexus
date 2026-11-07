@@ -206,7 +206,7 @@ export function draw(ctx: CanvasRenderingContext2D, w: number, h: number, d: Dra
     }
   }
 
-  // Earthquakes: diamonds sized by magnitude
+  // Conflict & security threats: diamonds sized by severity
   if (d.layers.events) {
     for (const e of d.events) {
       if (!isVisible(d.rotate, e.lon, e.lat)) continue;

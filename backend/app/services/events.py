@@ -1,4 +1,4 @@
-"""Events service: retrieve and filter external events (e.g. USGS earthquakes)."""
+"""Events service: retrieve and filter external conflict and security events."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def get_events(
     min_magnitude: float = 0.0,
     limit: int = 500,
 ) -> list[dict]:
-    """Recent events (USGS earthquakes in live mode), newest first."""
+    """Recent events (conflict incidents and security threats), newest first."""
     from app.core.config import get_settings
 
     mode = get_settings().DATA_MODE

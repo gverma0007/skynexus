@@ -11,7 +11,7 @@ reproducible (seeded):
     Eastern Mediterranean storm building to ~60 and traffic dipping 20%
                          (the weather-explained case)
     Korean Peninsula     mild surge (+18%) and an M4.2 quake
-- Hourly weather per region, background earthquakes in quake-prone zones.
+- Hourly weather per region, background conflict & threat events in conflict-prone zones.
 - ~180 satellites with valid TLEs (realistic constellations), propagated
   with the same SGP4 code as live mode.
 
@@ -260,8 +260,8 @@ def generate(rng: random.Random) -> dict:
 
 def _quake(region_id, when, mag, place, lat, lon, rng):
     sev = "High" if mag >= 5.5 else "Medium" if mag >= 4.0 else "Low"
-    return (f"demo-{rng.randint(0, 10**9)}", when, "Earthquake", "Natural Hazard", sev,
-            f"POINT({lon:.3f} {lat:.3f})", region_id, f"M{mag:.1f} earthquake — {place}", SRC)
+    return (f"demo-{rng.randint(0, 10**9)}", when, "Conflict Incident", "Geopolitical / Security Threat", sev,
+            f"POINT({lon:.3f} {lat:.3f})", region_id, f"Security alert (Lvl {mag:.1f}) — {place}", SRC)
 
 
 def main():

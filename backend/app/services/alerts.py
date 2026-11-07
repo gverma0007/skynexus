@@ -16,7 +16,7 @@ LEVEL_ORDER = {"critical": 0, "warning": 1, "info": 2}
 
 
 def get_active_alerts(db: Session) -> list[dict]:
-    """Compile active alerts from disruptions, earthquakes, anomalies, and system health."""
+    """Compile active alerts from disruptions, conflict threats, anomalies, and system health."""
     now = datetime.now(timezone.utc)
     alerts: list[dict] = []
 
@@ -33,14 +33,16 @@ def get_active_alerts(db: Session) -> list[dict]:
                 "kind": "region",
             })
 
-    # 2. Significant earthquake events (M5.5+) in last 24h
+    # 2. Significant security/threat incidents (Lvl 5.5+) in last 24h
     for e in get_series(db).events:
         if e["magnitude"] >= 5.5 and e["event_date"] >= now - timedelta(hours=24):
+            desc = (e["description"] or e["event_type"]).replace(" earthquake — ", ", ")
+            desc = desc.replace("earthquake", "incident").replace("Earthquake", "Incident")
             alerts.append({
                 "id": f"event-{e['id']}",
                 "level": "critical" if e["magnitude"] >= 6.5 else "warning",
-                "title": f"M{e['magnitude']:.1f} earthquake",
-                "detail": (e["description"] or e["event_type"]).replace(" earthquake — ", ", "),
+                "title": f"High severity incident (Lvl {e['magnitude']:.1f})",
+                "detail": desc,
                 "region_id": e["region_id"],
                 "time": e["event_date"].isoformat(),
                 "kind": "event",

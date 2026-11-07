@@ -7,7 +7,7 @@ Three queries build an 8-day hourly picture for all regions at once:
   ingest loop runs.
 - storm:    mean storm_index per hour, carried forward across hours with no
   reading (weather is a level, not a count).
-- events:   event count and largest magnitude per hour.
+- events:   conflict & threat event count and largest magnitude per hour.
 
 Hours in which the ingest loop collected no aircraft anywhere are treated
 as *missing* (None), not zero. Otherwise downtime would look like a global
@@ -45,6 +45,15 @@ class RegionSeries:
     storm: list[float | None]
     events: list[int]
     max_mag: list[float]
+    satellites: list[float | None] = field(default_factory=list)
+    flight_deviations: list[float | None] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        n = len(self.hours)
+        if not self.satellites:
+            self.satellites = [0.0] * n
+        if not self.flight_deviations:
+            self.flight_deviations = [0.0] * n
 
 
 @dataclass
@@ -144,6 +153,30 @@ def _build(db: Session, now: datetime | None) -> SeriesBundle:
         """
     ), {"start": start, "now": now}).all()
 
+    sat_rows = db.execute(text(
+        """
+        SELECT r.id::text, date_trunc('hour', so.timestamp) AS hr,
+               COUNT(DISTINCT so.satellite_id)
+        FROM satellite_observations so
+        JOIN regions r ON so.position && r.geom AND ST_Contains(r.geom, ST_Force2D(so.position))
+        WHERE so.timestamp >= :start AND so.timestamp <= :now
+        GROUP BY 1, 2
+        """
+    ), {"start": start, "now": now}).all()
+
+    dev_rows = db.execute(text(
+        f"""
+        SELECT fr.region_id::text, date_trunc('hour', fo.timestamp) AS hr,
+               AVG(ST_Distance(fo.position::geography, ST_MakeLine(ap1.geom, ap2.geom)::geography) / 1000.0) AS avg_dev_km
+        FROM flight_observations fo
+        JOIN flight_routes fr ON fr.id = fo.route_id
+        JOIN airports ap1 ON ap1.id = fr.origin_airport_id
+        JOIN airports ap2 ON ap2.id = fr.dest_airport_id
+        WHERE fo.timestamp >= :start AND fo.timestamp <= :now AND fr.region_id IS NOT NULL {src_fo}
+        GROUP BY 1, 2
+        """
+    ), {"start": start, "now": now}).all()
+
     bundle = SeriesBundle(built_at=time.monotonic(), now=now, hours=hours)
     for rid, name, lat, lon in regions:
         n = len(hours)
@@ -151,6 +184,7 @@ def _build(db: Session, now: datetime | None) -> SeriesBundle:
             region_id=rid, name=name, lat=float(lat), lon=float(lon), hours=hours,
             aircraft=[0.0 if h in global_hours else None for h in hours],
             storm=[None] * n, events=[0] * n, max_mag=[0.0] * n,
+            satellites=[None] * n, flight_deviations=[0.0] * n,
         )
 
     for rid, hr, count in flight_rows:
@@ -158,6 +192,34 @@ def _build(db: Session, now: datetime | None) -> SeriesBundle:
         i = index.get(hr)
         if rs is not None and i is not None:
             rs.aircraft[i] = float(count)
+
+    # satellites: place counts, then carry forward across gaps
+    last_sat_before: dict[str, float] = {}
+    for rid, hr, count in sat_rows:
+        rs = bundle.regions.get(rid)
+        if rs is None:
+            continue
+        i = index.get(hr)
+        if i is None:
+            last_sat_before[rid] = float(count)
+        else:
+            rs.satellites[i] = float(count)
+    for rid, rs in bundle.regions.items():
+        carry = last_sat_before.get(rid)
+        for i, v in enumerate(rs.satellites):
+            if v is not None:
+                carry = v
+            elif carry is not None:
+                rs.satellites[i] = carry
+            else:
+                rs.satellites[i] = 0.0
+
+    # flight route deviations: hourly average cross-track deviation (km)
+    for rid, hr, avg_dev in dev_rows:
+        rs = bundle.regions.get(rid)
+        i = index.get(hr)
+        if rs is not None and i is not None and avg_dev is not None:
+            rs.flight_deviations[i] = round(float(avg_dev), 1)
 
     # weather: place readings, then carry forward (max 6 h) across gaps
     last_before: dict[str, float] = {}

@@ -21,7 +21,7 @@ DISCLAIMER = "Correlation does not establish causation."
 SYSTEM_PROMPT = """You write short situation assessments for SkyNexus, a dashboard that
 compares a region's recent activity with the period just before it.
 
-You receive computed metrics only: aircraft per hour, earthquake counts and
+You receive computed metrics only: aircraft per hour, conflict & security threat counts and
 magnitudes, storm intensity, satellite passes and a 0-100 disruption index.
 
 Rules:
@@ -63,10 +63,10 @@ def template_explanation(m: dict) -> str:
     if ev["after"] > 0:
         largest = ev.get("largest")
         tail = f", the largest {largest}" if largest else ""
-        parts.append(f"{ev['after']} earthquake{'s were' if ev['after'] != 1 else ' was'} recorded "
+        parts.append(f"{ev['after']} security incident{'s were' if ev['after'] != 1 else ' was'} recorded "
                      f"(previously {ev['before']}){tail}.")
     elif ev["before"] > 0:
-        parts.append(f"No earthquakes were recorded, down from {ev['before']} in the period before.")
+        parts.append(f"No security incidents were recorded, down from {ev['before']} in the period before.")
 
     if wx["after"] is not None:
         if wx["after"] >= 40:

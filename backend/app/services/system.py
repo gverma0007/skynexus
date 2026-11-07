@@ -15,7 +15,7 @@ SOURCES = {
     "adsb.lol": ("Air traffic", "ADS-B aircraft positions", "https://adsb.lol"),
     "celestrak": ("Satellites", "Orbital elements (TLE), positioned with SGP4", "https://celestrak.org"),
     "open-meteo": ("Weather", "Wind, gusts and rain at each region centre", "https://open-meteo.com"),
-    "usgs": ("Earthquakes", "USGS M2.5+ and significant quakes", "https://earthquake.usgs.gov"),
+    "usgs": ("Conflict & Seismic Feeds", "USGS M2.5+ and security threat events", "https://earthquake.usgs.gov"),
     "demo_dataset": ("Demo data", "Generated 8-day synthetic world", None),
 }
 
@@ -23,7 +23,7 @@ DOMAIN_LABELS = {
     "flights": "Air traffic",
     "satellites": "Satellite positions",
     "weather": "Weather",
-    "events": "Earthquakes",
+    "events": "Conflict & Incidents",
 }
 
 

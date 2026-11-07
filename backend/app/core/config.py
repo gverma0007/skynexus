@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     DATA_MODE: str = "live"
     LIVE_INGEST: int = 1
     LIVE_INGEST_INTERVAL_S: int = 600
-    RETENTION_DAYS: int = 8
+    RETENTION_DAYS: int = 3
 
     # Optional: narrative text for reports. Without a key a deterministic
     # template writes the assessment instead.
@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     SEVERITY_LOW: int = 20
     SEVERITY_MEDIUM: int = 40
     SEVERITY_HIGH: int = 70
+
+    # Flight route deviation threshold (km)
+    FLIGHT_DEVIATION_LIMIT_KM: float = 300.0
 
     @property
     def severity_low(self) -> int:

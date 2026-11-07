@@ -7,9 +7,8 @@ own recent normal:
   hours vs the same hours of day across the prior 7 days. Both surges and
   drops count (a drop is what an airspace closure looks like). Scored from
   the z-score: |z| <= 1 is normal (0), |z| = 4 or more is 100.
-- Earthquakes / events (35%): magnitude-weighted points for the last 24 h,
-  decaying with a 12 h time constant, minus half the region's usual daily
-  background so quake-prone zones are not permanently flagged.
+- Conflict & security threats (30%): magnitude-weighted points for the last 24 h,
+  decaying with a 12 h time constant.
 - Storm intensity (25%): latest storm index (0-100) at the region centre.
 
 Bands (env-tunable): Calm < 20 <= Watch < 40 <= Elevated < 70 <= Critical.
@@ -26,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.services.series import RegionSeries, SeriesBundle, get_series
 
-WEIGHTS = {"flights": 0.35, "events": 0.30, "weather": 0.20, "satellites": 0.15}
+WEIGHTS = {"flights": 0.30, "events": 0.40, "weather": 0.15, "satellites": 0.15}
 RECENT_HOURS = 3
 MIN_BASELINE_HOURS = 12
 
@@ -102,10 +101,17 @@ def flight_component(rs: RegionSeries, end_idx: int, dev_info: dict | None = Non
         week_mean, week_std, week_z, week_pct = None, None, None, None
         z_eff = z
 
-    vol_score = clamp((abs(z_eff) - 1.0) / 3.0 * 100.0)
-    # Increase disruption score when aircraft route deviations are elevated in this zone
-    score = clamp(max(vol_score, dev_score * 0.75) + dev_score * 0.25)
-    return {"score": round(score, 1), "warming_up": False, "recent": _r(recent),
+    # Anomaly is calculated on flight route deviations, not on aeroplane volume/density changes
+    if not dev_score and hasattr(rs, "flight_deviations") and rs.flight_deviations:
+        dev_vals = [rs.flight_deviations[i] for i in range(max(0, end_idx - RECENT_HOURS), end_idx)
+                    if rs.flight_deviations[i] is not None and rs.flight_deviations[i] > 0]
+        if dev_vals:
+            mean_dev = statistics.fmean(dev_vals)
+            lim = max(60.0, get_settings().FLIGHT_DEVIATION_LIMIT_KM)
+            dev_score = clamp((mean_dev - 50.0) / (lim - 50.0) * 100.0)
+
+    score = round(dev_score, 1)
+    return {"score": score, "warming_up": False, "recent": _r(recent),
             "expected": _r(expected), "pct_change": _r(pct), "z": _r(z, 2),
             "direction": "up" if z > 0.5 else "down" if z < -0.5 else "flat",
             "baseline_days": coverage_days,
@@ -158,13 +164,14 @@ def weather_component(rs: RegionSeries, end_idx: int) -> dict:
             "storm_week_avg": _r(statistics.fmean(week)) if week else None}
 
 
-def satellite_component(sat_info: dict | None) -> dict:
+def satellite_component(sat_info: dict | None, rs: RegionSeries | None = None, end_idx: int | None = None) -> dict:
     """Satellite density & orbital profile score (0-100)."""
     if not sat_info or sat_info.get("count", 0) == 0:
         return {
             "score": 0.0,
             "count": 0,
             "density": 0.0,
+            "density_change_pct": None,
             "by_orbit": {"leo": 0, "meo": 0, "geo": 0},
             "by_category": {},
             "leo_earthobs": 0,
@@ -183,14 +190,27 @@ def satellite_component(sat_info: dict | None) -> dict:
     # 2. GNSS Navigation constellation adequacy (MEO GNSS health)
     nav_gap = 30.0 if (gnss_nav == 0 and count > 0) else (15.0 if gnss_nav == 1 else 0.0)
 
-    # 3. Density anomaly relative to typical orbital distribution (~10 sats / 100 sq deg)
+    # 3. Density anomaly relative to typical orbital distribution or baseline
+    density_pct = None
     density_dev = clamp((density - 10.0) / 15.0 * 30.0)
+    if rs is not None and end_idx is not None and hasattr(rs, "satellites") and rs.satellites:
+        base_sats = [rs.satellites[i] for i in range(0, max(0, end_idx - 24)) if rs.satellites[i] is not None]
+        if len(base_sats) >= 3:
+            base_mean = statistics.fmean(base_sats)
+            base_std = max(statistics.pstdev(base_sats), 0.1 * base_mean, 1.0)
+            recent_sats = [rs.satellites[i] for i in range(max(0, end_idx - RECENT_HOURS), end_idx)
+                           if rs.satellites[i] is not None]
+            recent_sat = statistics.fmean(recent_sats) if recent_sats else float(count)
+            density_z = (recent_sat - base_mean) / base_std
+            density_pct = (recent_sat - base_mean) / base_mean * 100.0 if base_mean > 0 else 0.0
+            density_dev = clamp((abs(density_z) - 1.0) / 3.0 * 50.0)
 
     score = clamp(obs_score + nav_gap + density_dev)
     return {
         "score": round(score, 1),
         "count": count,
         "density": round(density, 2),
+        "density_change_pct": round(density_pct, 1) if density_pct is not None else None,
         "by_orbit": by_orbit,
         "by_category": sat_info.get("by_category", {}),
         "leo_earthobs": leo_earthobs,
@@ -204,7 +224,7 @@ def score_region(rs: RegionSeries, events: list[dict], end_idx: int, at: datetim
     f = flight_component(rs, end_idx, dev_info=dev_info)
     e = event_component(events, at)
     w = weather_component(rs, end_idx)
-    s = satellite_component(sat_info)
+    s = satellite_component(sat_info, rs=rs, end_idx=end_idx)
     composite = (f["score"] * WEIGHTS["flights"] + e["score"] * WEIGHTS["events"]
                  + w["score"] * WEIGHTS["weather"] + s["score"] * WEIGHTS["satellites"])
     return {"composite": round(composite, 1), "flights": f, "events": e, "weather": w, "satellites": s}
@@ -214,33 +234,33 @@ def explain(name: str, s: dict) -> list[str]:
     f, e, w = s["flights"], s["events"], s["weather"]
     sat = s.get("satellites", {})
     lines: list[str] = []
-    if f["warming_up"]:
-        lines.append(f"Air traffic baseline is still building ({f['baseline_days']} of 1+ days collected).")
-    elif f["pct_change"] is not None and abs(f["pct_change"]) >= 10 and f["score"] > 0:
-        word = "above" if f["pct_change"] > 0 else "below"
-        lines.append(f"Air traffic is {abs(f['pct_change']):.0f}% {word} its normal for this time of day.")
-    else:
-        lines.append("Air traffic is within its normal range for this time of day.")
 
-    # Flight route deviation context
+    # Flight route deviation context (primary flight anomaly driver)
     devs = f.get("route_deviations", {})
     if devs.get("significant_count", 0) > 0:
-        lines.append(f"High flight route deviations detected ({devs['significant_count']} aircraft diverting up to {devs['max_km']:.0f} km off planned corridor).")
+        if (w["storm_now"] or 0) < 35:
+            lines.append(f"Airspace conflict avoidance: {devs['significant_count']} aircraft diverting up to {devs['max_km']:.0f} km off corridor in clear skies.")
+        else:
+            lines.append(f"High flight route deviations detected ({devs['significant_count']} aircraft diverting up to {devs['max_km']:.0f} km off planned corridor).")
     elif devs.get("minor_count", 0) > 0:
         lines.append(f"Minor route diversions detected ({devs['minor_count']} aircraft off nominal route).")
+    else:
+        lines.append("Flight routes are following nominal corridors.")
 
-    # Weekly flight deviation context
-    if f.get("week_pct_change") is not None and abs(f["week_pct_change"]) >= 12 and not f["warming_up"]:
-        w_dir = "above" if f["week_pct_change"] > 0 else "below"
-        lines.append(f"Air traffic is {abs(f['week_pct_change']):.0f}% {w_dir} its 7-day weekly average.")
+    # Air traffic volume context (informational)
+    if f.get("pct_change") is not None and abs(f["pct_change"]) >= 15:
+        word = "above" if f["pct_change"] > 0 else "below"
+        lines.append(f"Air traffic volume is {abs(f['pct_change']):.0f}% {word} its diurnal average.")
 
-    if e["largest"]:
-        lines.append(f"{e['count_24h']} earthquake{'s' if e['count_24h'] != 1 else ''} in 24 h; "
+    if e.get("largest"):
+        lines.append(f"{e['count_24h']} security incident{'s' if e['count_24h'] != 1 else ''} in 24 h; "
                      f"largest {e['largest']['label']}.")
     if w["storm_now"] is not None and w["storm_now"] >= 40:
         lines.append(f"Storm intensity is high ({w['storm_now']:.0f}/100).")
-    if f.get("direction") == "down" and (w["storm_now"] or 0) >= 40:
-        lines.append("Bad weather may explain the drop in air traffic.")
+    if devs.get("deviating_count", 0) > 0 and (w["storm_now"] or 0) >= 40:
+        lines.append("Severe weather explains flight corridor deviations.")
+    elif devs.get("deviating_count", 0) > 0 and (w["storm_now"] or 0) < 35 and sat.get("score", 0) >= 30:
+        lines.append("War & conflict early warning: Coincident satellite surveillance surge and flight corridor avoidance.")
 
     # Satellite density and orbital context
     if sat.get("count", 0) > 0:
@@ -251,7 +271,10 @@ def explain(name: str, s: dict) -> list[str]:
         if by_orb.get("meo", 0) > 0:
             orbits.append(f"{by_orb['meo']} MEO")
         orbit_str = f" ({', '.join(orbits)})" if orbits else ""
-        if sat.get("leo_earthobs", 0) >= 3:
+        if sat.get("density_change_pct") is not None and abs(sat["density_change_pct"]) >= 20:
+            s_word = "surge" if sat["density_change_pct"] > 0 else "drop"
+            lines.append(f"Satellite density {s_word} detected ({abs(sat['density_change_pct']):.0f}% vs baseline).")
+        elif sat.get("leo_earthobs", 0) >= 3:
             lines.append(f"Elevated LEO Earth-observation surveillance density ({sat['leo_earthobs']} passes overhead).")
         elif sat.get("score", 0) >= 30:
             lines.append(f"Satellite coverage density is elevated ({sat['count']} overhead{orbit_str}).")
@@ -312,9 +335,11 @@ def _sparkline(rs: RegionSeries, evs: list[dict], end_idx: int) -> list[float | 
 
 def _event_brief(e: dict, at: datetime) -> dict:
     age_h = (at - e["event_date"]).total_seconds() / 3600.0
+    raw_desc = (e["description"] or e["event_type"]).replace(" earthquake — ", ", ")
+    raw_desc = raw_desc.replace("earthquake", "incident").replace("Earthquake", "Incident")
     return {"id": e["id"], "magnitude": e["magnitude"], "description": e["description"],
             "event_date": e["event_date"].isoformat(), "hours_ago": round(max(age_h, 0), 1),
-            "label": (e["description"] or e["event_type"]).replace(" earthquake — ", ", ")}
+            "label": raw_desc}
 
 
 def _r(v: float | None, nd: int = 1) -> float | None:

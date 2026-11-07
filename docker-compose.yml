@@ -5,6 +5,7 @@ services:
   db:
     image: postgis/postgis:16-3.4
     restart: unless-stopped
+    command: postgres -c shared_buffers=32MB -c work_mem=2MB -c maintenance_work_mem=16MB -c max_connections=20 -c effective_cache_size=64MB -c autovacuum_max_workers=2 -c max_worker_processes=4 -c max_parallel_workers=2
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
@@ -31,13 +32,14 @@ services:
       DATA_MODE: ${DATA_MODE:-live}
       DEMO_RESET: ${DEMO_RESET:-0}
       LIVE_INGEST: ${LIVE_INGEST:-1}
-      LIVE_INGEST_INTERVAL_S: ${LIVE_INGEST_INTERVAL_S:-600}
-      RETENTION_DAYS: ${RETENTION_DAYS:-8}
+      LIVE_INGEST_INTERVAL_S: ${LIVE_INGEST_INTERVAL_S:-540}
+      RETENTION_DAYS: ${RETENTION_DAYS:-3}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
       SEVERITY_LOW: ${SEVERITY_LOW:-20}
       SEVERITY_MEDIUM: ${SEVERITY_MEDIUM:-40}
       SEVERITY_HIGH: ${SEVERITY_HIGH:-70}
+      FLIGHT_DEVIATION_LIMIT_KM: ${FLIGHT_DEVIATION_LIMIT_KM:-300}
     ports:
       - "${API_PORT:-8000}:8000"
 

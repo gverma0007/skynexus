@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
+
 
 def great_circle_waypoints(lat1: float, lon1: float, lat2: float, lon2: float, num_points: int = 15) -> list[dict]:
     """Generate intermediate (lat, lon) coordinates along the great-circle route."""
@@ -32,7 +34,8 @@ def great_circle_waypoints(lat1: float, lon1: float, lat2: float, lon2: float, n
 
 
 def calculate_route_deviation(lat_p: float, lon_p: float, heading: float,
-                              lat1: float, lon1: float, lat2: float, lon2: float) -> dict:
+                              lat1: float, lon1: float, lat2: float, lon2: float,
+                              limit_km: float | None = None) -> dict:
     """Calculate cross-track distance, heading deviation, and progress along planned route."""
     R = 6371.0  # Earth radius in km
     r_lat1, r_lon1 = math.radians(lat1), math.radians(lon1)
@@ -66,9 +69,10 @@ def calculate_route_deviation(lat_p: float, lon_p: float, heading: float,
     progress_pct = round(min(100.0, max(0.0, at_km / max(1.0, total_km) * 100.0)), 1)
 
     abs_xt = abs(xt_km)
+    limit = limit_km or get_settings().FLIGHT_DEVIATION_LIMIT_KM
     if abs_xt <= 50.0:
         status = "on_route"
-    elif abs_xt <= 120.0:
+    elif abs_xt <= limit:
         status = "minor_deviation"
     else:
         status = "significant_deviation"
@@ -241,8 +245,10 @@ def get_flight_detail(db: Session, icao24: str) -> dict | None:
     }
 
 
-def get_flight_deviations(db: Session, min_deviation_km: float = 50.0, limit: int = 50) -> list[dict]:
+def get_flight_deviations(db: Session, min_deviation_km: float | None = None, limit: int = 50) -> list[dict]:
     """Retrieve active flights deviating significantly from their general travel route."""
+    if min_deviation_km is None:
+        min_deviation_km = get_settings().FLIGHT_DEVIATION_LIMIT_KM
     all_live = get_live_flights(db, limit=1000)
     deviating = [
         f for f in all_live
@@ -254,6 +260,7 @@ def get_flight_deviations(db: Session, min_deviation_km: float = 50.0, limit: in
 
 def get_all_region_flight_deviations(db: Session) -> dict[str, dict]:
     """Aggregate route deviations per monitored region to feed disruption scoring."""
+    limit_km = get_settings().FLIGHT_DEVIATION_LIMIT_KM
     all_live = get_live_flights(db, limit=1000)
     by_region: dict[str, dict] = {}
     for f in all_live:
@@ -280,7 +287,7 @@ def get_all_region_flight_deviations(db: Session) -> dict[str, dict]:
             if xt_km > entry["max_km"]:
                 entry["max_km"] = round(xt_km, 1)
             entry["total_km"] += xt_km
-            if dev.get("status") == "significant_deviation" or xt_km >= 120.0:
+            if dev.get("status") == "significant_deviation" or xt_km >= limit_km:
                 entry["significant_count"] += 1
             else:
                 entry["minor_count"] += 1
@@ -289,7 +296,7 @@ def get_all_region_flight_deviations(db: Session) -> dict[str, dict]:
         if d["deviating_count"] > 0:
             d["avg_km"] = round(d["total_km"] / d["deviating_count"], 1)
             # Route deviation intensity score (0-100)
-            score = min(100.0, d["significant_count"] * 30.0 + d["minor_count"] * 12.0 + max(0.0, d["max_km"] - 50.0) / 4.0)
+            score = min(100.0, d["significant_count"] * 30.0 + d["minor_count"] * 12.0 + max(0.0, d["max_km"] - limit_km) / 4.0)
             d["dev_score"] = round(score, 1)
 
     return by_region

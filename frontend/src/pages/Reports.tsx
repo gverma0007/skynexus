@@ -175,7 +175,7 @@ function ReportDoc({ report: r, history }: { report: Report; history?: { baselin
       (m) => `| ${m.label} (${m.unit}) | ${fmtNum(m.before, 1)} | ${fmtNum(m.after, 1)} | ${fmtPct(m.delta_pct)} |`),
     ...(r.flight_deviations ? [`| Flight corridor deviations | – | ${r.flight_deviations.deviating_flights} flights (max ${Math.round(r.flight_deviations.max_deviation_km)} km) | ${r.flight_deviations.significant_deviations > 0 ? 'significant' : 'nominal'} |`] : []),
     '', '## Assessment', '', r.overall_assessment, '',
-    ...(r.events_metrics.list.length ? ['## Earthquakes in the window', '', ...r.events_metrics.list.map((e) => `- ${e.description} (${fmtDateTime(e.event_date)})`), ''] : []),
+    ...(r.events_metrics.list.length ? ['## Conflict & War Threats in the window', '', ...r.events_metrics.list.map((e) => `- ${(e.description ?? '').replace(' earthquake — ', ', ').replace(/earthquake/gi, 'incident')} (${fmtDateTime(e.event_date)})`), ''] : []),
     ...(histData?.points?.length ? ['## Historical Baseline (API retrieved)', '', `Baseline of ${histData.baseline_hours} hours across preceding period.`, ''] : []),
     `_Data coverage ${fmtNum(r.confidence_pct)}%. Assessment written by ${r.ai_source === 'claude' ? 'Claude' : 'the built-in template'}._`,
   ].join('\n');
@@ -235,8 +235,8 @@ function ReportDoc({ report: r, history }: { report: Report; history?: { baselin
       )}
       {r.events_metrics.list.length > 0 && (
         <div className="doc-events">
-          <h4>Earthquakes in this window</h4>
-          <ul>{r.events_metrics.list.map((e) => <li key={e.event_date + e.magnitude}>{(e.description ?? '').replace(' earthquake — ', ', ')} <span className="muted">({fmtDateTime(e.event_date)})</span></li>)}</ul>
+          <h4>Conflict & Security Incidents in this window</h4>
+          <ul>{r.events_metrics.list.map((e) => <li key={e.event_date + e.magnitude}>{(e.description ?? '').replace(' earthquake — ', ', ').replace(/^M[\d.]+ earthquake — /, 'Incident: ')} <span className="muted">({fmtDateTime(e.event_date)})</span></li>)}</ul>
         </div>
       )}
       <div className="disc">

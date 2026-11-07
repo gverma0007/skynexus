@@ -14,11 +14,13 @@ logger = logging.getLogger("skynexus")
 
 
 def _ingest_loop(interval_s: int) -> None:
+    import gc
     from app.services import ingest
 
     while True:
         summary = ingest.run_cycle()
         logger.info("[ingest] %s", summary)
+        gc.collect()
         time.sleep(interval_s)
 
 

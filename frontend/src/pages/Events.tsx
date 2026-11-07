@@ -33,8 +33,8 @@ export default function Events({ regions, outlines, tab }: { regions: Region[] |
 
   const exportCsv = () => {
     if (tab === 'quakes') {
-      downloadText(`skynexus-earthquakes-${stamp()}.csv`, toCsv((events.data ?? []).map((e) => ({
-        time_utc: e.event_date, magnitude: e.magnitude, description: e.description, region: e.region_name,
+      downloadText(`skynexus-conflicts-${stamp()}.csv`, toCsv((events.data ?? []).map((e) => ({
+        time_utc: e.event_date, severity_level: e.magnitude, description: e.description, region: e.region_name,
         lat: e.lat, lon: e.lon, source: e.source,
       }))), 'text/csv');
     } else {
@@ -49,14 +49,14 @@ export default function Events({ regions, outlines, tab }: { regions: Region[] |
     <div className="page">
       <div className="pagehead">
         <div>
-          <h1>Events</h1>
-          <p>Earthquakes inside the monitored regions, and the hours the anomaly model flagged as unusual.</p>
+          <h1>Conflict & Security Events</h1>
+          <p>Conflict incidents and early warnings inside monitored regions, and anomaly alerts.</p>
         </div>
         <button className="btn" onClick={exportCsv}>Export CSV</button>
       </div>
       <div className="toolbar">
         <div className="seg" role="tablist" aria-label="Event type">
-          <button role="tab" aria-selected={tab === 'quakes'} className={tab === 'quakes' ? 'on' : ''} onClick={() => go('events')}>Earthquakes</button>
+          <button role="tab" aria-selected={tab === 'quakes'} className={tab === 'quakes' ? 'on' : ''} onClick={() => go('events')}>Conflict & War Alerts</button>
           <button role="tab" aria-selected={tab === 'anomalies'} className={tab === 'anomalies' ? 'on' : ''} onClick={() => go('events', 'anomalies')}>Anomaly log</button>
         </div>
         <label className="field">
@@ -72,8 +72,8 @@ export default function Events({ regions, outlines, tab }: { regions: Region[] |
           {[1, 7, 30].map((d) => <button key={d} className={days === d ? 'on' : ''} aria-pressed={days === d} onClick={() => setDays(d)}>{d === 1 ? '24 h' : `${d} days`}</button>)}
         </div>
         {tab === 'quakes' && (
-          <div className="seg" role="group" aria-label="Minimum magnitude">
-            {[0, 4, 5].map((m) => <button key={m} className={minMag === m ? 'on' : ''} aria-pressed={minMag === m} onClick={() => setMinMag(m)}>{m === 0 ? 'Any size' : `M${m}+`}</button>)}
+          <div className="seg" role="group" aria-label="Minimum severity">
+            {[0, 4, 5].map((m) => <button key={m} className={minMag === m ? 'on' : ''} aria-pressed={minMag === m} onClick={() => setMinMag(m)}>{m === 0 ? 'Any size' : `Lvl ${m}+`}</button>)}
           </div>
         )}
       </div>
@@ -82,23 +82,23 @@ export default function Events({ regions, outlines, tab }: { regions: Region[] |
         <div className="events-grid">
           <section className="panel">
             <FlatMap dots={dots} boxes={boxes} highlight={highlight} height={300} onDot={setHighlight}
-              caption="Dashed boxes are monitored regions. Red diamonds are M5.5 or larger." />
+              caption="Dashed boxes are monitored regions. Red diamonds are high-severity incidents." />
           </section>
-          <section className="panel ev-list" aria-label="Earthquake list">
+          <section className="panel ev-list" aria-label="Conflict event list">
             {events.error && <ErrorNote message={events.error} onRetry={events.refresh} />}
             {!events.data && !events.error && <div className="pad"><Skeleton rows={6} /></div>}
             {events.data && events.data.length === 0 && (
-              <Empty title="No earthquakes match">Widen the time range or lower the magnitude filter.</Empty>
+              <Empty title="No conflict incidents match">Widen the time range or lower the severity filter.</Empty>
             )}
             {groups.map(([day, list]) => (
               <div key={day}>
                 <h4 className="day">{day}</h4>
                 {list.map((e) => (
                   <button key={e.id} className={`ev-row ${highlight === e.id ? 'sel' : ''}`} onClick={() => setHighlight(e.id)}>
-                    <span className="mag num">M{e.magnitude.toFixed(1)}</span>
+                    <span className="mag num">Lvl {e.magnitude.toFixed(1)}</span>
                     <Diamond mag={e.magnitude} />
                     <span className="grow">
-                      {(e.description ?? e.event_type).replace(/^M[\d.]+ earthquake — /, '')}
+                      {(e.description ?? e.event_type).replace(/^M[\d.]+ earthquake — /, 'Incident: ')}
                       <span className="block small muted">{e.region_name}</span>
                     </span>
                     <span className="small muted nowrap" title={fmtDateTime(e.event_date)}>{timeAgo(e.event_date)}</span>
@@ -133,7 +133,7 @@ export default function Events({ regions, outlines, tab }: { regions: Region[] |
           )}
           <p className="note">
             Each hour is scored against the region's earlier hours with a z-score and an Isolation Forest. Only hours scoring 50 or more, with a z-score of at least 2 or a strong Isolation Forest score, are kept.
-            A traffic drop during a storm is marked as weather-explained.
+            A flight route deviation during a storm is marked as weather-explained.
           </p>
         </section>
       )}

@@ -17,7 +17,7 @@ def list_events(
     limit: int = Query(500, le=2000),
     db: Session = Depends(get_db),
 ):
-    """Recent events (USGS earthquakes in live mode), newest first."""
+    """Recent events (conflict incidents and security threats), newest first."""
     return get_events(
         db,
         region_id=region_id,

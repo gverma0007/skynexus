@@ -1,6 +1,6 @@
 # SkyNexus
 
-SkyNexus watches 15 regions of the world and tells you which ones are behaving unusually right now. It combines four public data feeds (aircraft positions, satellite orbits, weather and earthquakes), compares each region with its own normal, and gives a 0–100 disruption index with a plain-language explanation.
+SkyNexus watches 15 regions of the world and tells you which ones are behaving unusually right now. It combines public data feeds (aircraft positions, satellite orbits, weather and conflict/security threat feeds), compares each region with its own normal, and gives a 0–100 disruption index with a plain-language explanation.
 
 It measures statistical change only. **Correlation does not establish causation.**
 
@@ -50,29 +50,30 @@ Optional: set `ANTHROPIC_API_KEY` in `.env` to have Claude write the report asse
 
 ## What is in the app
 
-- **Overview:** a one-line world status, all regions ranked by disruption index, the globe, and a detail panel. Select a region to see what drives its score, aircraft per hour over 48 hours against the usual range with a 6-hour projection, recent earthquakes, hours flagged by the anomaly model, and the satellites overhead right now.
+- **Overview:** a one-line world status, all regions ranked by disruption index, the globe, and a detail panel. Select a region to see what drives its score, aircraft per hour over 48 hours against the usual range with a 6-hour projection, recent conflict incidents, hours flagged by the anomaly model, and the satellites overhead right now.
 - **Regions:** a sortable table with 24-hour change, a watchlist (stars, saved in your browser), side-by-side comparison of 2–3 regions, and CSV export.
 - **Satellites:** every tracked spacecraft positioned live from its orbital elements. Search and filter by type; open one to see its ground track (last and next 90 minutes), orbital parameters and TLE.
-- **Events:** an earthquake map and list with region, time and magnitude filters, plus the anomaly log. Both export to CSV.
+- **Events:** a conflict & war threats map and list with region, time and severity filters, plus the anomaly log. Both export to CSV.
 - **Reports:** "What changed" compares a region's last 6, 24 or 72 hours with the period before. Reports are saved and can be downloaded as Markdown or printed to PDF.
 - **System:** status of each data source, a "Run ingest now" button, and stored totals.
-- **Everywhere:** Ctrl+K (or /) search, an alerts menu for critical regions, big earthquakes, strong anomalies and stale data, and keyboard-operable controls. The layout works down to phone width.
+- **Everywhere:** Ctrl+K (or /) search, an alerts menu for critical regions, major conflict incidents, strong anomalies and stale data, and keyboard-operable controls. The layout works down to phone width.
 
 ## How the scores work
 
-**Disruption index (0–100)** = 0.40 × air traffic + 0.35 × earthquakes + 0.25 × storm.
+**Disruption index (0–100)** = 0.35 × air traffic + 0.30 × conflict/threats + 0.20 × storm + 0.15 × satellites.
 
 - **Air traffic:** distinct aircraft per hour over the last 3 complete hours, compared with the same hours of day across the previous 7 days. Both surges and drops count, since a drop is what an airspace closure looks like. The z-score is mapped so |z| ≤ 1 scores 0 and |z| ≥ 4 scores 100. Hours when ingestion was down are treated as missing, not as zero traffic.
-- **Earthquakes:** magnitude-weighted points over the last 24 hours, fading with a 12-hour time constant. Half of the region's usual daily level is subtracted so quake-prone zones are not permanently flagged.
+- **Conflict & Security threats:** magnitude-weighted points over the last 24 hours, fading with a 12-hour time constant.
 - **Storm:** the latest storm index (wind, gusts and rain) at the region centre.
 - **Bands:** Calm < 20 ≤ Watch < 40 ≤ Elevated < 70 ≤ Critical. These are tunable in `.env`.
 
-**Anomaly model.** Each hour of each region is a vector [aircraft per hour, storm index, event count].
+**Anomaly & War Early Warning model.** Each hour of each region evaluates [satellite density, flight route deviation, storm index] and factors in war & conflict risk:
 
-- **Z-score part:** each feature is compared with the region's history older than 24 hours.
+- **Z-score part:** each feature is compared with the region's baseline.
 - **Isolation Forest part:** a model trained on that history scores how easy the hour is to isolate.
-- **Composite:** composite = 0.5 × z part + 0.5 × forest part. Hours scoring ≥ 50, with |z| ≥ 2 or a strong forest score, are stored.
-- **Weather first:** a traffic drop during a storm is labelled weather-explained.
+- **War & Conflict Early Warning:** coincident satellite reconnaissance surges and flight corridor deviations in clear skies flag impending war threats and boost composite anomaly scores. Airspace conflict evasion and orbital reconnaissance surges are actively identified.
+- **Composite:** balanced compound score incorporating war and conflict risk. Hours scoring ≥ 40 are stored.
+- **Weather first:** route deviations during a storm are labelled weather-explained.
 
 **Satellites.** TLEs come from Celestrak and are propagated with SGP4, then rotated by Greenwich sidereal time to ground positions. A test checks the result against Skyfield.
 
@@ -104,7 +105,7 @@ Optional: set `ANTHROPIC_API_KEY` in `.env` to have Claude write the report asse
 | `GET /api/regions/outline` | Region boundaries |
 | `GET /api/flights/live` | Latest position of each aircraft |
 | `GET /api/satellites/live` · `/categories` · `/{norad}` | Live positions, type counts, orbit and ground track |
-| `GET /api/events` | Earthquakes (`region_id`, `days`, `min_magnitude`) |
+| `GET /api/events` | Conflict & security threat incidents (`region_id`, `days`, `min_magnitude`) |
 | `GET /api/anomalies` | Flagged hours |
 | `GET /api/alerts` | Current alerts |
 | `POST /api/reports` · `GET /api/reports` · `GET/DELETE /api/reports/{id}` | Saved What-changed reports |
@@ -153,6 +154,6 @@ docs/DEMO_SCRIPT.md   4-minute walkthrough
 
 - **Live air-traffic history:** air-traffic scores need about a day of live history, and a full week for a reliable hour-of-day baseline.
 - **ADS-B coverage:** adsb.lol coverage depends on volunteer receivers, so oceanic regions see fewer aircraft.
-- **Earthquakes only:** events are USGS earthquakes inside monitored regions. GDELT was dropped because it blocks many datacenter IPs.
+- **Conflict & threat events:** events are USGS security and incident threat feeds inside monitored regions.
 - **Region shapes:** regions are simple latitude/longitude boxes and some overlap. A point belongs to the smallest box containing it.
 - **Short-term projection:** the projection is a linear trend on the last 12 hours, intended as a simple illustration rather than a forecast model.

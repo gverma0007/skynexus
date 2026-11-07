@@ -109,11 +109,11 @@ def build_metrics(db: Session, region_id: str, hours: int) -> dict | None:
             "deviation_score": dev_info.get("dev_score", 0.0) if dev_info else 0.0,
         },
         "events_metrics": {
-            "label": "Earthquakes", "unit": "events",
+            "label": "Conflict & War Threats", "unit": "incidents",
             "before": len(ev_before), "after": len(ev_after),
             "delta_pct": _pct(len(ev_before), len(ev_after)),
-            "largest": (largest["description"] or "").replace(" earthquake — ", ", ") if largest else None,
-            "list": [{"description": e["description"], "magnitude": e["magnitude"],
+            "largest": (largest["description"] or "").replace(" earthquake — ", ", ").replace("earthquake", "incident").replace("Earthquake", "Incident") if largest else None,
+            "list": [{"description": (e["description"] or "").replace(" earthquake — ", ", ").replace("earthquake", "incident").replace("Earthquake", "Incident"), "magnitude": e["magnitude"],
                       "event_date": e["event_date"].isoformat()}
                      for e in sorted(ev_after, key=lambda e: -e["magnitude"])[:5]],
         },
