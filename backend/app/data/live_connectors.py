@@ -201,7 +201,9 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
     client = httpx.Client(timeout=20, headers=UA)
     from app.core.config import get_settings
     st = get_settings()
-    auth = (st.OPENSKY_USERNAME, st.OPENSKY_PASSWORD) if (st.OPENSKY_USERNAME and st.OPENSKY_PASSWORD) else None
+    user = st.OPENSKY_CLIENT_ID or st.OPENSKY_USERNAME
+    secret = st.OPENSKY_CLIENT_SECRET or st.OPENSKY_PASSWORD
+    auth = (user, secret) if (user and secret) else None
 
     # 1. Primary: OpenSky Network worldwide snapshot (10,000+ live planes in 1 call)
     try:

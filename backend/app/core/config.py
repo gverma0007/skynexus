@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     RETENTION_DAYS: int = 3
 
     # Optional: OpenSky Network credentials (bypasses datacenter IP rate limits on Render/AWS)
+    OPENSKY_CLIENT_ID: str = ""
+    OPENSKY_CLIENT_SECRET: str = ""
     OPENSKY_USERNAME: str = ""
     OPENSKY_PASSWORD: str = ""
 
