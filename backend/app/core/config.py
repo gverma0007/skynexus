@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     LIVE_INGEST_INTERVAL_S: int = 600
     RETENTION_DAYS: int = 3
 
+    # Optional: OpenSky Network credentials (bypasses datacenter IP rate limits on Render/AWS)
+    OPENSKY_USERNAME: str = ""
+    OPENSKY_PASSWORD: str = ""
+
     # Optional: narrative text for reports. Without a key a deterministic
     # template writes the assessment instead.
     ANTHROPIC_API_KEY: str = ""

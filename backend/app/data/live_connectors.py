@@ -100,27 +100,21 @@ REGION_QUERY_POINTS: dict[str, list[tuple[float, float]]] = {
         (59.4, 24.8),   # Tallinn
     ],
     "South China Sea": [
-        (12.5, 112.5), (1.36, 103.99), (22.3, 113.9),
-        (14.5, 121.0),  # Manila
-        (13.7, 100.5),  # Bangkok
-        (3.1, 101.7),   # Kuala Lumpur
-        (-6.2, 106.8),  # Jakarta
+        (14.5, 120.5),  # Manila
         (10.8, 106.7),  # Ho Chi Minh
+        (16.0, 108.2),  # Da Nang
+        (12.5, 112.5), (1.36, 103.99), (22.3, 113.9),
     ],
     "North Atlantic": [
-        (45.0, -25.0), (51.47, -0.45), (63.98, -22.6),
-        (40.64, -73.78),  # New York
-        (38.7, -9.1),     # Lisbon
-        (46.2, -60.2),    # Sydney NS
-        (53.3, -6.2),     # Dublin
-        (36.1, -5.3),     # Gibraltar
+        (53.0, -9.5),   # West Ireland / Shannon
+        (38.7, -27.2),  # Azores
+        (46.2, -60.2),  # Nova Scotia
+        (45.0, -25.0), (63.98, -22.6),
     ],
     "Pacific": [
         (21.3, -157.9),   # Honolulu
         (19.7, -155.1),   # Hilo
         (8.0, -165.0),    # zone centre
-        (1.9, -157.4),    # Kiritimati
-        (-13.8, -171.8),  # Apia
     ],
 }
 
@@ -205,10 +199,13 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
     aircraft_by_hex: dict[str, dict] = {}
     now = datetime.now(timezone.utc)
     client = httpx.Client(timeout=20, headers=UA)
+    from app.core.config import get_settings
+    st = get_settings()
+    auth = (st.OPENSKY_USERNAME, st.OPENSKY_PASSWORD) if (st.OPENSKY_USERNAME and st.OPENSKY_PASSWORD) else None
 
     # 1. Primary: OpenSky Network worldwide snapshot (10,000+ live planes in 1 call)
     try:
-        res = client.get("https://opensky-network.org/api/states/all")
+        res = client.get("https://opensky-network.org/api/states/all", auth=auth)
         if res.status_code == 200:
             states = res.json().get("states", []) or []
             for s in states:
@@ -242,7 +239,30 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
     except Exception as exc:
         logger.warning("OpenSky fetch failed: %s", exc)
 
-    # 2. Secondary / Fallback: probe regions with sparse aircraft coverage via adsb.lol
+    # 2. Worldwide military and patrol aircraft (free, keyless, active worldwide)
+    try:
+        m_res = client.get("https://api.adsb.lol/v2/mil")
+        if m_res.status_code == 200:
+            for ac in m_res.json().get("ac", []) or []:
+                hex_id = (ac.get("hex") or "").strip().lower()
+                if hex_id and "lat" in ac and "lon" in ac and hex_id not in aircraft_by_hex:
+                    reg = region_for(shapes, float(ac["lat"]), float(ac["lon"]))
+                    if reg and reg["id"] in routes:
+                        alt = ac.get("alt_baro")
+                        aircraft_by_hex[hex_id] = {
+                            "lat": float(ac["lat"]),
+                            "lon": float(ac["lon"]),
+                            "callsign": (ac.get("flight") or ac.get("r") or "").strip() or "MIL",
+                            "alt_ft": int(alt) if isinstance(alt, (int, float)) else 0,
+                            "speed_kt": float(ac.get("gs") or 0.0),
+                            "heading_deg": float(ac.get("track") or 0.0),
+                            "source": "adsb.lol-mil",
+                            "region_id": reg["id"],
+                        }
+    except Exception as exc:
+        logger.warning("adsb.lol /mil failed: %s", exc)
+
+    # 3. Secondary / Fallback: probe regions with sparse aircraft coverage via adsb.lol
     counts_per_region: dict[str, int] = {}
     for ac in aircraft_by_hex.values():
         rid = ac.get("region_id")
@@ -258,7 +278,7 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
     if sparse_regions or not aircraft_by_hex:
         targets = sparse_regions if aircraft_by_hex else list(REGION_QUERY_POINTS.keys())
         for region_name in targets:
-            points = REGION_QUERY_POINTS.get(region_name, [])[:2]
+            points = REGION_QUERY_POINTS.get(region_name, [])[:3]
             for lat, lon in points:
                 try:
                     res = client.get(f"https://api.adsb.lol/v2/point/{lat}/{lon}/{ADSB_RADIUS_NM}")
