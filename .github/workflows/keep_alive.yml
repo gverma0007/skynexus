@@ -1,0 +1,23 @@
+name: Keep Render 24/7 Alive
+
+on:
+  schedule:
+    # Runs every 10 minutes to prevent Render free tier from hibernating
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render Backend Health Check
+        run: |
+          echo "Pinging SkyNexus Render backend to keep 24/7 alive..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 https://skynexus.onrender.com/api/health)
+          echo "Health check response code: $STATUS"
+
+      - name: Trigger Live Ingestion Cycle
+        run: |
+          echo "Triggering live ingestion cycle..."
+          curl -s -X POST --max-time 60 https://skynexus.onrender.com/api/ingest/live || true
+
