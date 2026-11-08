@@ -43,30 +43,15 @@ UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, 
 CACHE_DIR = Path("/tmp/skynexus_cache")
 CACHE_DIR.mkdir(exist_ok=True)
 
-# Celestrak group catalogs -> how many to track from each, mapped to the
-# satellite's functional category so the globe can group/filter by mission.
+# Celestrak group catalogs -> streamlined core constellations for fast,
+# rate-limit-free tracking of ~200 real, active satellites across all missions.
 SATELLITE_GROUPS: dict[str, tuple[int, str]] = {
-    "stations": (50, "station"),
-    "weather": (150, "weather"),
-    "science": (150, "science"),
-    "gps-ops": (40, "nav"),
-    "galileo": (40, "nav"),
-    "glo-ops": (40, "nav"),
-    "gnss": (100, "nav"),
-    "planet": (250, "earthobs"),
-    "spire": (180, "earthobs"),
-    "resource": (150, "earthobs"),
-    "geo": (400, "comms"),
-    "oneweb": (150, "comms"),
-    "iridium-NEXT": (80, "comms"),
-    "globalstar": (50, "comms"),
-    "orbcomm": (40, "comms"),
-    "ses": (60, "comms"),
-    "intelsat": (50, "comms"),
-    "amateur": (80, "comms"),
-    "cubesat": (80, "science"),
-    "visual": (100, "science"),
-    "sarsat": (60, "science"),
+    "stations": (20, "station"),
+    "weather": (40, "weather"),
+    "gps-ops": (32, "nav"),
+    "galileo": (30, "nav"),
+    "resource": (40, "earthobs"),
+    "visual": (50, "science"),
 }
 
 # Regions likely to have live traffic; used for the adsb point queries.
@@ -398,7 +383,7 @@ def propagate_tle(tle_line1: str, tle_line2: str, when: datetime) -> tuple[float
     return lat, lon, alt
 
 
-def fetch_satellite_positions(db: Session, steps: int = 6, step_minutes: int = 10) -> int:
+def fetch_satellite_positions(db: Session, steps: int = 3, step_minutes: int = 10) -> int:
     """Propagate the tracked constellation and store ground-track observations."""
     from sgp4.api import Satrec
 
@@ -410,10 +395,19 @@ def fetch_satellite_positions(db: Session, steps: int = 6, step_minutes: int = 1
     else:
         logger.info("Tracking %d satellites from %d groups", len(catalog), len(SATELLITE_GROUPS))
 
-    total = 0
     now = datetime.now(timezone.utc)
+    # Preload existing satellites in one query to eliminate per-satellite roundtrips
+    existing_sats = {s.norad_id: s for s in db.query(Satellite).all()}
+
+    # Clear previous forecast window in one single bulk delete
+    db.query(SatelliteObservation).filter(
+        SatelliteObservation.timestamp >= now - timedelta(minutes=step_minutes),
+        SatelliteObservation.source == "celestrak",
+    ).delete(synchronize_session=False)
+
+    new_obs = []
     for name, norad, l1, l2, category in catalog:
-        sat = db.query(Satellite).filter(Satellite.norad_id == norad).first()
+        sat = existing_sats.get(norad)
         if sat is None:
             sat = Satellite(
                 norad_id=norad, name=name, category=category,
@@ -421,6 +415,7 @@ def fetch_satellite_positions(db: Session, steps: int = 6, step_minutes: int = 1
             )
             db.add(sat)
             db.flush()
+            existing_sats[norad] = sat
         else:
             sat.name, sat.category = name, category
             sat.tle_line1, sat.tle_line2 = l1, l2
@@ -431,14 +426,6 @@ def fetch_satellite_positions(db: Session, steps: int = 6, step_minutes: int = 1
             logger.warning("Bad TLE for %s: %s", name, exc)
             continue
 
-        # Replace the previous forecast window so the table stays bounded:
-        # each cycle rewrites now..now+steps*step_minutes, while older rows
-        # survive as track history until retention prune.
-        db.query(SatelliteObservation).filter(
-            SatelliteObservation.satellite_id == sat.id,
-            SatelliteObservation.timestamp >= now - timedelta(minutes=step_minutes),
-        ).delete(synchronize_session=False)
-
         # Spacecraft in view now + near-future ground track steps
         for step in range(steps):
             when = now + timedelta(minutes=step * step_minutes)
@@ -446,18 +433,21 @@ def fetch_satellite_positions(db: Session, steps: int = 6, step_minutes: int = 1
                 lat, lon, alt = propagate_tle(l1, l2, when)
             except ValueError:
                 continue
-            db.add(
+            new_obs.append(
                 SatelliteObservation(
                     satellite_id=sat.id,
                     timestamp=when,
-                    position=f"POINTZ({lon} {lat} {alt})",
+                    position=f"POINTZ({lon:.4f} {lat:.4f} {alt:.1f})",
                     altitude_km=alt,
                     source="celestrak",
                 )
             )
-            total += 1
+
+    if new_obs:
+        db.add_all(new_obs)
     db.commit()
-    return total
+    logger.info("Satellite propagation completed: %d observations stored", len(new_obs))
+    return len(new_obs)
 
 
 # ---------------------------------------------------------------- weather --
