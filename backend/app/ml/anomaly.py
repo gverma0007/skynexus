@@ -164,9 +164,9 @@ def score_region(rs: RegionSeries) -> list[dict]:
             "timestamp": rs.hours[i] + timedelta(minutes=30),
             "feature_name": feature,
             "observed_value": float(row[dom]),
-            "z_score": round(z_dom, 2),
-            "isolation_forest_score": round(if_scaled, 1),
-            "composite_score": round(composite, 1),
+            "z_score": round(float(z_dom), 2),
+            "isolation_forest_score": round(float(if_scaled), 1),
+            "composite_score": round(float(composite), 1),
             "severity_label": sev,
         })
     return out
@@ -199,7 +199,16 @@ def run_anomaly_detection(db: Session) -> int:
                     :observed_value, :z_score, :isolation_forest_score, :composite_score,
                     :severity_label, now())
                 """
-            ), r)
+            ), {
+                "region_id": r["region_id"],
+                "timestamp": r["timestamp"],
+                "feature_name": r["feature_name"],
+                "observed_value": float(r["observed_value"]),
+                "z_score": float(r["z_score"]),
+                "isolation_forest_score": float(r["isolation_forest_score"]),
+                "composite_score": float(r["composite_score"]),
+                "severity_label": str(r["severity_label"]),
+            })
             written += 1
     retention = int(get_settings().RETENTION_DAYS)
     db.execute(text("DELETE FROM anomaly_scores WHERE timestamp < now() - make_interval(days => :d)"), {"d": retention})

@@ -177,3 +177,15 @@ def test_flight_route_deviation_increases_disruption_index():
     f_dev = flight_component(rs, len(HOURS) - 1, dev_info=dev_info)
     assert f_dev["score"] >= 75.0
     assert f_dev["route_deviations"]["significant_count"] == 2
+
+
+def test_anomaly_rows_return_native_python_floats():
+    sat = flat(10.0); sat[-1] = 95.0
+    rs = series(flat(50.0), flat(10.0), satellites=sat)
+    rows = anomaly_rows(rs)
+    for r in rows:
+        assert type(r["composite_score"]) is float
+        assert type(r["z_score"]) is float
+        assert type(r["isolation_forest_score"]) is float
+        assert type(r["observed_value"]) is float
+

@@ -169,9 +169,46 @@ def _route_for(db: Session, region: Region) -> FlightRoute | None:
 
 
 # ---------------------------------------------------------------- flights --
+_opensky_token: str | None = None
+_opensky_token_expiry: float = 0.0
+
+
+def _get_opensky_auth_header() -> dict[str, str]:
+    global _opensky_token, _opensky_token_expiry
+    from app.core.config import get_settings
+    st = get_settings()
+    client_id = st.OPENSKY_CLIENT_ID or st.OPENSKY_USERNAME
+    client_secret = st.OPENSKY_CLIENT_SECRET or st.OPENSKY_PASSWORD
+    if not client_id or not client_secret:
+        return {}
+    now = time.time()
+    if _opensky_token and now < _opensky_token_expiry:
+        return {"Authorization": f"Bearer {_opensky_token}"}
+    try:
+        res = httpx.post(
+            "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+            timeout=15,
+        )
+        if res.status_code == 200:
+            data = res.json()
+            _opensky_token = data.get("access_token")
+            expires_in = data.get("expires_in", 1800)
+            _opensky_token_expiry = now + max(60, expires_in - 120)
+            return {"Authorization": f"Bearer {_opensky_token}"}
+        logger.warning("OpenSky OAuth token rejected: HTTP %s", res.status_code)
+    except Exception as exc:
+        logger.warning("OpenSky OAuth token error: %s", exc)
+    return {}
+
+
 def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -> int:
     """Pull live aircraft positions from OpenSky Network (worldwide coverage),
-    supplemented by adsb.lol for regional coverage gaps."""
+    supplemented by adsb.lol for military aircraft."""
     from app.services.geo import region_for, region_shapes
 
     shapes = region_shapes(db)
@@ -183,16 +220,13 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
 
     aircraft_by_hex: dict[str, dict] = {}
     now = datetime.now(timezone.utc)
-    client = httpx.Client(timeout=20, headers=UA)
-    from app.core.config import get_settings
-    st = get_settings()
-    user = st.OPENSKY_CLIENT_ID or st.OPENSKY_USERNAME
-    secret = st.OPENSKY_CLIENT_SECRET or st.OPENSKY_PASSWORD
-    auth = (user, secret) if (user and secret) else None
+    client = httpx.Client(timeout=35, headers=UA)
+    auth_header = _get_opensky_auth_header()
+    req_headers = {**UA, **auth_header} if auth_header else UA
 
     # 1. Primary: OpenSky Network worldwide snapshot (10,000+ live planes in 1 call)
     try:
-        res = client.get("https://opensky-network.org/api/states/all", auth=auth)
+        res = client.get("https://opensky-network.org/api/states/all", headers=req_headers)
         if res.status_code == 200:
             states = res.json().get("states", []) or []
             for s in states:
@@ -246,52 +280,40 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
                             "source": "adsb.lol-mil",
                             "region_id": reg["id"],
                         }
+        elif m_res.status_code == 429:
+            logger.warning("adsb.lol /mil returned 429 rate limit")
     except Exception as exc:
         logger.warning("adsb.lol /mil failed: %s", exc)
 
-    # 3. Secondary / Fallback: probe regions with sparse aircraft coverage via adsb.lol
-    counts_per_region: dict[str, int] = {}
-    for ac in aircraft_by_hex.values():
-        rid = ac.get("region_id")
-        if rid:
-            counts_per_region[rid] = counts_per_region.get(rid, 0) + 1
-
-    regions_by_name = {r.name: str(r.id) for r in db.query(Region).all()}
-    sparse_regions = [
-        rname for rname, points in REGION_QUERY_POINTS.items()
-        if counts_per_region.get(regions_by_name.get(rname, ""), 0) < 15
-    ]
-
-    if sparse_regions or not aircraft_by_hex:
-        targets = sparse_regions if aircraft_by_hex else list(REGION_QUERY_POINTS.keys())
-        for region_name in targets:
-            points = REGION_QUERY_POINTS.get(region_name, [])[:3]
-            for lat, lon in points:
-                try:
-                    res = client.get(f"https://api.adsb.lol/v2/point/{lat}/{lon}/{ADSB_RADIUS_NM}")
-                    if res.status_code == 200:
-                        for ac in res.json().get("ac", []) or []:
-                            hex_id = (ac.get("hex") or "").strip().lower()
-                            if hex_id and "lat" in ac and "lon" in ac and hex_id not in aircraft_by_hex:
-                                reg = region_for(shapes, float(ac["lat"]), float(ac["lon"]))
-                                if reg and reg["id"] in routes:
-                                    alt = ac.get("alt_baro")
-                                    aircraft_by_hex[hex_id] = {
-                                        "lat": float(ac["lat"]),
-                                        "lon": float(ac["lon"]),
-                                        "callsign": (ac.get("flight") or ac.get("r") or "").strip(),
-                                        "alt_ft": int(alt) if isinstance(alt, (int, float)) else 0,
-                                        "speed_kt": float(ac.get("gs") or 0.0),
-                                        "heading_deg": float(ac.get("track") or 0.0),
-                                        "source": "adsb.lol",
-                                        "region_id": reg["id"],
-                                    }
-                    elif res.status_code == 429:
-                        logger.warning("adsb.lol %s -> HTTP 429, skipping points", region_name)
-                        break
-                    time.sleep(0.8)
-                except Exception as exc:
-                    logger.warning("adsb.lol point %s failed: %s", (lat, lon), exc)
+    # 3. Secondary fallback: only if OpenSky returned nothing
+    if not aircraft_by_hex:
+        for region_name, points in list(REGION_QUERY_POINTS.items())[:5]:
+            lat, lon = points[0]
+            try:
+                res = client.get(f"https://api.adsb.lol/v2/point/{lat}/{lon}/{ADSB_RADIUS_NM}")
+                if res.status_code == 200:
+                    for ac in res.json().get("ac", []) or []:
+                        hex_id = (ac.get("hex") or "").strip().lower()
+                        if hex_id and "lat" in ac and "lon" in ac and hex_id not in aircraft_by_hex:
+                            reg = region_for(shapes, float(ac["lat"]), float(ac["lon"]))
+                            if reg and reg["id"] in routes:
+                                alt = ac.get("alt_baro")
+                                aircraft_by_hex[hex_id] = {
+                                    "lat": float(ac["lat"]),
+                                    "lon": float(ac["lon"]),
+                                    "callsign": (ac.get("flight") or ac.get("r") or "").strip(),
+                                    "alt_ft": int(alt) if isinstance(alt, (int, float)) else 0,
+                                    "speed_kt": float(ac.get("gs") or 0.0),
+                                    "heading_deg": float(ac.get("track") or 0.0),
+                                    "source": "adsb.lol",
+                                    "region_id": reg["id"],
+                                }
+                elif res.status_code == 429:
+                    logger.warning("adsb.lol %s -> HTTP 429, skipping points", region_name)
+                    break
+                time.sleep(0.5)
+            except Exception as exc:
+                logger.warning("adsb.lol point %s failed: %s", (lat, lon), exc)
     client.close()
 
     per_region: dict[str, int] = {}
@@ -467,25 +489,34 @@ def _region_latlon(db: Session, region: Region) -> tuple[float, float] | None:
 
 def fetch_live_weather(db: Session) -> int:
     """Current conditions at each region centroid -> storm index."""
+    regions = db.query(Region).all()
+    reg_coords = []
+    for r in regions:
+        pt = _region_latlon(db, r)
+        if pt:
+            reg_coords.append((r, pt[0], pt[1]))
+    if not reg_coords:
+        return 0
+
     total = 0
     client = httpx.Client(timeout=20, headers=UA)
+    now = datetime.now(timezone.utc)
     try:
-        for region in db.query(Region).all():
-            point = _region_latlon(db, region)
-            if not point:
-                continue
-            lat, lon = point
-            try:
-                res = client.get(
-                    "https://api.open-meteo.com/v1/forecast",
-                    params={
-                        "latitude": lat,
-                        "longitude": lon,
-                        "current": "wind_speed_10m,precipitation,wind_gusts_10m",
-                    },
-                )
-                res.raise_for_status()
-                cur = res.json().get("current", {})
+        lats = ",".join(f"{lat:.4f}" for _, lat, _ in reg_coords)
+        lons = ",".join(f"{lon:.4f}" for _, _, lon in reg_coords)
+        res = client.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lats,
+                "longitude": lons,
+                "current": "wind_speed_10m,precipitation,wind_gusts_10m",
+            },
+        )
+        if res.status_code == 200:
+            data = res.json()
+            items = data if isinstance(data, list) else [data]
+            for (region, lat, lon), item in zip(reg_coords, items):
+                cur = item.get("current", {})
                 wind_kmh = float(cur.get("wind_speed_10m", 0) or 0)
                 gust_kmh = float(cur.get("wind_gusts_10m", 0) or 0)
                 precip = float(cur.get("precipitation", 0) or 0)
@@ -494,7 +525,7 @@ def fetch_live_weather(db: Session) -> int:
                 db.add(
                     WeatherObservation(
                         region_id=region.id,
-                        timestamp=datetime.now(timezone.utc),
+                        timestamp=now,
                         position=point_to_wkt(lon, lat),
                         wind_speed_kt=wind_kt,
                         precipitation_mm=precip,
@@ -503,9 +534,12 @@ def fetch_live_weather(db: Session) -> int:
                     )
                 )
                 total += 1
-            except Exception as exc:
-                logger.warning("Open-Meteo failed for %s: %s", region.name, exc)
-        db.commit()
+            db.commit()
+            logger.info("Open-Meteo recorded %d live weather observations", total)
+        else:
+            logger.warning("Open-Meteo batch returned status %s", res.status_code)
+    except Exception as exc:
+        logger.warning("Open-Meteo batch fetch failed: %s", exc)
     finally:
         client.close()
     return total

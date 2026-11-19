@@ -24,9 +24,9 @@ class Settings(BaseSettings):
     LIVE_INGEST_INTERVAL_S: int = 600
     RETENTION_DAYS: int = 3
 
-    # Optional: OpenSky Network credentials (bypasses datacenter IP rate limits on Render/AWS)
-    OPENSKY_CLIENT_ID: str = ""
-    OPENSKY_CLIENT_SECRET: str = ""
+    # OpenSky Network OAuth2 credentials (bypasses datacenter IP rate limits on Render/AWS)
+    OPENSKY_CLIENT_ID: str = "babulal-api-client"
+    OPENSKY_CLIENT_SECRET: str = "Cq5RX55QwKxa1pz8tg235EMbCpJfVGxo"
     OPENSKY_USERNAME: str = ""
     OPENSKY_PASSWORD: str = ""
 
