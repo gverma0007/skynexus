@@ -40,7 +40,26 @@ Open **http://localhost:5173**. The first start takes a few minutes while images
 
 To switch modes, edit `.env` and run `docker compose up -d`. To regenerate the demo world, set `DEMO_RESET=1` for one start. To wipe everything, run `docker compose down -v`.
 
-Optional: set `ANTHROPIC_API_KEY` in `.env` to have Claude write the report assessments (without a key, a built-in template writes them), and `OPENSKY_CLIENT_ID` / `OPENSKY_CLIENT_SECRET` for OAuth2 access to OpenSky Network. A GitHub Actions keep-alive workflow (`.github/workflows/keep_alive.yml`) pings `/api/health` and triggers `/api/ingest/live` every 10 minutes for 24/7 hosted deployments (Render + Vercel + Supabase).
+Optional: set `ANTHROPIC_API_KEY` in `.env` to have Claude write the report assessments (without a key, a built-in template writes them), and `OPENSKY_CLIENT_ID` / `OPENSKY_CLIENT_SECRET` for OAuth2 access to OpenSky Network.
+
+### API & Environment Configuration
+
+All settings live in `backend/app/core/config.py` and can be set via `.env` or hosting environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `postgresql://user:password@localhost:5432/skynexus` | PostgreSQL + PostGIS connection string (e.g. Supabase) |
+| `ENV` | `development` | Runtime environment (`development` / `production`) |
+| `DATA_MODE` | `live` | `live` pulls real public feeds; `demo` generates a synthetic 8-day world |
+| `LIVE_INGEST` | `1` | Enable (`1`) or disable (`0`) the background ingestion loop |
+| `LIVE_INGEST_INTERVAL_S` | `600` | Seconds between live ingestion cycles (10 minutes) |
+| `RETENTION_DAYS` | `3` | Rolling retention window in days; older observations are pruned each cycle |
+| `OPENSKY_CLIENT_ID` / `OPENSKY_CLIENT_SECRET` | — | OpenSky Network OAuth2 client credentials (`client_credentials` token flow) |
+| `OPENSKY_USERNAME` / `OPENSKY_PASSWORD` | — | Legacy fallback OpenSky credentials if OAuth2 client vars are unset |
+| `ANTHROPIC_API_KEY` | — | Optional Claude API key for AI-written report assessments |
+| `ANTHROPIC_MODEL` | `claude-sonnet-5-5` | Anthropic model used when `ANTHROPIC_API_KEY` is set |
+| `SEVERITY_LOW` / `SEVERITY_MEDIUM` / `SEVERITY_HIGH` | `20` / `40` / `70` | Disruption index band thresholds (`Calm < 20 ≤ Watch < 40 ≤ Elevated < 70 ≤ Critical`) |
+| `FLIGHT_DEVIATION_LIMIT_KM` | `300.0` | Cross-track distance threshold (km) for flagging flight route deviations |
 
 | URL | |
 |---|---|
@@ -94,6 +113,27 @@ Optional: set `ANTHROPIC_API_KEY` in `.env` to have Claude write the report asse
                                             │
          nginx ─► React + d3-geo canvas globe  (frontend container, :5173)
 ```
+
+### Deployment Architecture (Vercel + Render + Supabase)
+
+For 24/7 cloud hosting on free tiers, SkyNexus splits across three services plus a scheduled keep-alive job:
+
+```
+  Browser ──► Vercel (React SPA + vercel.json /api/* proxy)
+                │
+                ▼  https://skynexus.onrender.com/api/*
+              Render Web Service (FastAPI + Uvicorn + live ingest loop)
+                ▲                                    │
+                │  every 10 min (/api/health         ▼  DATABASE_URL (SSL)
+                │  + POST /api/ingest/live)        Supabase (PostgreSQL 16 + PostGIS,
+         GitHub Actions                              3-day rolling retention)
+    (.github/workflows/keep_alive.yml)
+```
+
+- **Frontend (Vercel):** Serves the Vite/React build and rewrites `/api/:path*` to `https://skynexus.onrender.com/api/:path*` via [`vercel.json`](vercel.json) (with SPA fallback to `/index.html`).
+- **Backend (Render):** Runs [`backend/entrypoint.sh`](backend/entrypoint.sh) (DB wait, `alembic upgrade head`, region/airport/satellite seeding, and `uvicorn app.main:app`). On startup in `live` mode it purges any synthetic demo rows and starts the 10-minute background ingestion + ML loop.
+- **Database (Supabase):** Managed PostgreSQL 16 with PostGIS (`DATABASE_URL`), storing 3 days of rolling live observations (`flight_observations`, `satellite_observations`, `weather_observations`, `events`) and ML `anomaly_scores`.
+- **24/7 Keep-Alive (GitHub Actions):** [`.github/workflows/keep_alive.yml`](.github/workflows/keep_alive.yml) runs on `*/10 * * * *` to ping `/api/health` and trigger `POST /api/ingest/live`, preventing Render free-tier sleep so the 3-day ML baseline stays populated.
 
 ### API
 
