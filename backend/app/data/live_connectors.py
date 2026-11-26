@@ -103,8 +103,8 @@ REGION_QUERY_POINTS: dict[str, list[tuple[float, float]]] = {
     ],
 }
 
-# ADS-B search radius (nm) and per-region aircraft cap.
-ADSB_RADIUS_NM = 400
+# ADS-B search radius (nm, max 250 for adsb.fi & adsb.lol v2) and per-region cap.
+ADSB_RADIUS_NM = 250
 ADSB_MAX_PER_REGION = 500
 
 # Nearest major airport per region — ADS-B gives positions, not routes, so
@@ -311,7 +311,7 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
         for region_name, points in REGION_QUERY_POINTS.items():
             lat, lon = points[0]
             try:
-                res = client.get(f"https://opendata.adsb.fi/api/v2/lat/{lat}/{lon}/dist/{ADSB_RADIUS_NM}")
+                res = client.get(f"https://opendata.adsb.fi/api/v2/lat/{lat}/lon/{lon}/dist/{ADSB_RADIUS_NM}")
                 if res.status_code == 200:
                     data = res.json()
                     _collect_adsb_items(
@@ -320,7 +320,7 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
                         "adsb.fi",
                         shapes,
                     )
-                    time.sleep(0.35)
+                    time.sleep(1.1)  # adsb.fi enforces ~1 req/s rate limit
                     continue
                 logger.warning("adsb.fi %s -> HTTP %s", region_name, res.status_code)
             except Exception as exc:
@@ -334,7 +334,7 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
                     elif res.status_code == 429:
                         logger.warning("adsb.lol %s -> HTTP 429, skipping further adsb.lol calls", region_name)
                         adsb_lol_limited = True
-                    time.sleep(0.6)
+                    time.sleep(1.0)
                 except Exception as exc:
                     logger.warning("adsb.lol point %s failed: %s", (lat, lon), exc)
     client.close()
