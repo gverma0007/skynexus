@@ -226,28 +226,13 @@ def purge_synthetic() -> dict:
             .delete(synchronize_session=False)
         )
 
-        # Satellites left with no observations at all (demo-only rows; the
-        # live connector always commits observations with the satellite).
+        # Demo-only satellites with no observations left.
         db.execute(
             text(
                 """
                 DELETE FROM satellites
                 WHERE id NOT IN (
                     SELECT DISTINCT satellite_id FROM satellite_observations
-                )
-                """
-            )
-        )
-
-        # Demo routes whose airports came from the demo scenario only
-        # (airports seeded here are real and stay).
-        db.execute(
-            text(
-                """
-                DELETE FROM flight_routes
-                WHERE id NOT IN (
-                    SELECT DISTINCT route_id FROM flight_observations
-                    WHERE route_id IS NOT NULL
                 )
                 """
             )

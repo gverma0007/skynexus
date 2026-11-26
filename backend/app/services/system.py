@@ -12,6 +12,7 @@ from app.services import ingest
 
 SOURCES = {
     "opensky": ("Air traffic", "OpenSky Network worldwide live ADS-B vectors", "https://opensky-network.org"),
+    "adsb.fi": ("Air traffic", "adsb.fi live regional ADS-B feed", "https://opendata.adsb.fi"),
     "adsb.lol": ("Air traffic", "ADS-B aircraft positions", "https://adsb.lol"),
     "adsb.lol-mil": ("Air traffic", "adsb.lol military and tactical aircraft", "https://api.adsb.lol"),
     "celestrak": ("Satellites", "Orbital elements (TLE), positioned with SGP4", "https://celestrak.org"),

@@ -206,9 +206,42 @@ def _get_opensky_auth_header() -> dict[str, str]:
     return {}
 
 
+def _collect_adsb_items(
+    aircraft_by_hex: dict[str, dict],
+    items: list[dict],
+    source: str,
+    shapes: list[dict],
+    default_callsign: str = "",
+) -> int:
+    """Parse adsb.lol / adsb.fi aircraft dicts into aircraft_by_hex."""
+    from app.services.geo import region_for
+
+    added = 0
+    for ac in items:
+        hex_id = (ac.get("hex") or "").strip().lower()
+        if not hex_id or "lat" not in ac or "lon" not in ac or hex_id in aircraft_by_hex:
+            continue
+        reg = region_for(shapes, float(ac["lat"]), float(ac["lon"]))
+        if not reg:
+            continue
+        alt = ac.get("alt_baro")
+        aircraft_by_hex[hex_id] = {
+            "lat": float(ac["lat"]),
+            "lon": float(ac["lon"]),
+            "callsign": (ac.get("flight") or ac.get("r") or "").strip() or default_callsign,
+            "alt_ft": int(alt) if isinstance(alt, (int, float)) else 0,
+            "speed_kt": float(ac.get("gs") or 0.0),
+            "heading_deg": float(ac.get("track") or 0.0),
+            "source": source,
+            "region_id": reg["id"],
+        }
+        added += 1
+    return added
+
+
 def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -> int:
     """Pull live aircraft positions from OpenSky Network (worldwide coverage),
-    supplemented by adsb.lol for military aircraft."""
+    falling back to adsb.fi / adsb.lol across all monitored regions."""
     from app.services.geo import region_for, region_shapes
 
     shapes = region_shapes(db)
@@ -224,7 +257,8 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
     auth_header = _get_opensky_auth_header()
     req_headers = {**UA, **auth_header} if auth_header else UA
 
-    # 1. Primary: OpenSky Network worldwide snapshot (10,000+ live planes in 1 call)
+    # 1. Primary: OpenSky Network worldwide snapshot (5,000-10,000+ live planes in 1 call)
+    opensky_count = 0
     try:
         res = client.get("https://opensky-network.org/api/states/all", headers=req_headers)
         if res.status_code == 200:
@@ -237,7 +271,7 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
                 if not hex_id or lat is None or lon is None:
                     continue
                 reg = region_for(shapes, float(lat), float(lon))
-                if not reg or reg["id"] not in routes:
+                if not reg:
                     continue
                 alt_m = s[7]
                 alt_ft = int(alt_m * 3.28084) if isinstance(alt_m, (int, float)) else 0
@@ -254,78 +288,68 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
                     "source": "opensky",
                     "region_id": reg["id"],
                 }
-            logger.info("OpenSky tracked %d aircraft across monitored regions", len(aircraft_by_hex))
+                opensky_count += 1
+            logger.info("OpenSky tracked %d aircraft across monitored regions", opensky_count)
         else:
             logger.warning("OpenSky API returned HTTP %s", res.status_code)
     except Exception as exc:
         logger.warning("OpenSky fetch failed: %s", exc)
 
-    # 2. Worldwide military and patrol aircraft (free, keyless, active worldwide)
+    # 2. Worldwide military and patrol aircraft (free, keyless)
     try:
         m_res = client.get("https://api.adsb.lol/v2/mil")
         if m_res.status_code == 200:
-            for ac in m_res.json().get("ac", []) or []:
-                hex_id = (ac.get("hex") or "").strip().lower()
-                if hex_id and "lat" in ac and "lon" in ac and hex_id not in aircraft_by_hex:
-                    reg = region_for(shapes, float(ac["lat"]), float(ac["lon"]))
-                    if reg and reg["id"] in routes:
-                        alt = ac.get("alt_baro")
-                        aircraft_by_hex[hex_id] = {
-                            "lat": float(ac["lat"]),
-                            "lon": float(ac["lon"]),
-                            "callsign": (ac.get("flight") or ac.get("r") or "").strip() or "MIL",
-                            "alt_ft": int(alt) if isinstance(alt, (int, float)) else 0,
-                            "speed_kt": float(ac.get("gs") or 0.0),
-                            "heading_deg": float(ac.get("track") or 0.0),
-                            "source": "adsb.lol-mil",
-                            "region_id": reg["id"],
-                        }
+            _collect_adsb_items(aircraft_by_hex, m_res.json().get("ac", []) or [], "adsb.lol-mil", shapes, "MIL")
         elif m_res.status_code == 429:
             logger.warning("adsb.lol /mil returned 429 rate limit")
     except Exception as exc:
         logger.warning("adsb.lol /mil failed: %s", exc)
 
-    # 3. Secondary fallback: only if OpenSky returned nothing
-    if not aircraft_by_hex:
-        for region_name, points in list(REGION_QUERY_POINTS.items())[:5]:
+    # 3. Regional ADS-B fallback across all regions whenever OpenSky didn't deliver
+    if opensky_count == 0:
+        adsb_lol_limited = False
+        for region_name, points in REGION_QUERY_POINTS.items():
             lat, lon = points[0]
             try:
-                res = client.get(f"https://api.adsb.lol/v2/point/{lat}/{lon}/{ADSB_RADIUS_NM}")
+                res = client.get(f"https://opendata.adsb.fi/api/v2/lat/{lat}/{lon}/dist/{ADSB_RADIUS_NM}")
                 if res.status_code == 200:
-                    for ac in res.json().get("ac", []) or []:
-                        hex_id = (ac.get("hex") or "").strip().lower()
-                        if hex_id and "lat" in ac and "lon" in ac and hex_id not in aircraft_by_hex:
-                            reg = region_for(shapes, float(ac["lat"]), float(ac["lon"]))
-                            if reg and reg["id"] in routes:
-                                alt = ac.get("alt_baro")
-                                aircraft_by_hex[hex_id] = {
-                                    "lat": float(ac["lat"]),
-                                    "lon": float(ac["lon"]),
-                                    "callsign": (ac.get("flight") or ac.get("r") or "").strip(),
-                                    "alt_ft": int(alt) if isinstance(alt, (int, float)) else 0,
-                                    "speed_kt": float(ac.get("gs") or 0.0),
-                                    "heading_deg": float(ac.get("track") or 0.0),
-                                    "source": "adsb.lol",
-                                    "region_id": reg["id"],
-                                }
-                elif res.status_code == 429:
-                    logger.warning("adsb.lol %s -> HTTP 429, skipping points", region_name)
-                    break
-                time.sleep(0.5)
+                    data = res.json()
+                    _collect_adsb_items(
+                        aircraft_by_hex,
+                        data.get("aircraft") or data.get("ac") or [],
+                        "adsb.fi",
+                        shapes,
+                    )
+                    time.sleep(0.35)
+                    continue
+                logger.warning("adsb.fi %s -> HTTP %s", region_name, res.status_code)
             except Exception as exc:
-                logger.warning("adsb.lol point %s failed: %s", (lat, lon), exc)
+                logger.warning("adsb.fi %s failed: %s", region_name, exc)
+
+            if not adsb_lol_limited:
+                try:
+                    res = client.get(f"https://api.adsb.lol/v2/point/{lat}/{lon}/{ADSB_RADIUS_NM}")
+                    if res.status_code == 200:
+                        _collect_adsb_items(aircraft_by_hex, res.json().get("ac", []) or [], "adsb.lol", shapes)
+                    elif res.status_code == 429:
+                        logger.warning("adsb.lol %s -> HTTP 429, skipping further adsb.lol calls", region_name)
+                        adsb_lol_limited = True
+                    time.sleep(0.6)
+                except Exception as exc:
+                    logger.warning("adsb.lol point %s failed: %s", (lat, lon), exc)
     client.close()
 
     per_region: dict[str, int] = {}
-    total = 0
+    new_obs: list[FlightObservation] = []
     for hex_id, ac in aircraft_by_hex.items():
         reg_id = ac.get("region_id")
-        if not reg_id or reg_id not in routes:
+        if not reg_id:
             continue
         if per_region.get(reg_id, 0) >= max_per_region:
             continue
-        db.add(FlightObservation(
-            route_id=routes[reg_id].id,
+        route = routes.get(reg_id)
+        new_obs.append(FlightObservation(
+            route_id=route.id if route else None,
             callsign=ac["callsign"][:64] or "UNKNOWN",
             icao24=hex_id[:64],
             timestamp=now,
@@ -336,8 +360,10 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
             source=ac.get("source", "opensky"),
         ))
         per_region[reg_id] = per_region.get(reg_id, 0) + 1
-        total += 1
+    if new_obs:
+        db.add_all(new_obs)
     db.commit()
+    total = len(new_obs)
     logger.info("Total live flights stored: %d across %d regions", total, len(per_region))
     return total
 
@@ -489,21 +515,18 @@ def _region_latlon(db: Session, region: Region) -> tuple[float, float] | None:
 
 def fetch_live_weather(db: Session) -> int:
     """Current conditions at each region centroid -> storm index."""
-    regions = db.query(Region).all()
-    reg_coords = []
-    for r in regions:
-        pt = _region_latlon(db, r)
-        if pt:
-            reg_coords.append((r, pt[0], pt[1]))
-    if not reg_coords:
+    from app.services.geo import region_shapes
+
+    shapes = region_shapes(db)
+    if not shapes:
         return 0
 
     total = 0
     client = httpx.Client(timeout=20, headers=UA)
     now = datetime.now(timezone.utc)
     try:
-        lats = ",".join(f"{lat:.4f}" for _, lat, _ in reg_coords)
-        lons = ",".join(f"{lon:.4f}" for _, _, lon in reg_coords)
+        lats = ",".join(f"{s['lat']:.4f}" for s in shapes)
+        lons = ",".join(f"{s['lon']:.4f}" for s in shapes)
         res = client.get(
             "https://api.open-meteo.com/v1/forecast",
             params={
@@ -515,26 +538,27 @@ def fetch_live_weather(db: Session) -> int:
         if res.status_code == 200:
             data = res.json()
             items = data if isinstance(data, list) else [data]
-            for (region, lat, lon), item in zip(reg_coords, items):
+            obs = []
+            for s, item in zip(shapes, items):
                 cur = item.get("current", {})
                 wind_kmh = float(cur.get("wind_speed_10m", 0) or 0)
                 gust_kmh = float(cur.get("wind_gusts_10m", 0) or 0)
                 precip = float(cur.get("precipitation", 0) or 0)
-                wind_kt = wind_kmh * 0.539957
-                storm = _storm_index(wind_kmh, gust_kmh, precip)
-                db.add(
+                obs.append(
                     WeatherObservation(
-                        region_id=region.id,
+                        region_id=s["id"],
                         timestamp=now,
-                        position=point_to_wkt(lon, lat),
-                        wind_speed_kt=wind_kt,
+                        position=point_to_wkt(s["lon"], s["lat"]),
+                        wind_speed_kt=wind_kmh * 0.539957,
                         precipitation_mm=precip,
-                        storm_index=storm,
+                        storm_index=_storm_index(wind_kmh, gust_kmh, precip),
                         source="open-meteo",
                     )
                 )
-                total += 1
+            if obs:
+                db.add_all(obs)
             db.commit()
+            total = len(obs)
             logger.info("Open-Meteo recorded %d live weather observations", total)
         else:
             logger.warning("Open-Meteo batch returned status %s", res.status_code)
