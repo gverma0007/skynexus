@@ -1,6 +1,6 @@
 # SkyNexus
 
-SkyNexus watches 15 regions of the world and tells you which ones are behaving unusually right now. It combines public data feeds (aircraft positions, satellite orbits, weather and conflict/security threat feeds), compares each region with its own normal, and gives a 0–100 disruption index with a plain-language explanation.
+SkyNexus watches 16 regions of the world and tells you which ones are behaving unusually right now. It combines public data feeds (aircraft positions, satellite orbits, weather and conflict/security threat feeds), compares each region with its own normal, and gives a 0–100 disruption index with a plain-language explanation.
 
 It measures statistical change only. **Correlation does not establish causation.**
 
@@ -35,12 +35,12 @@ Open **http://localhost:5173**. The first start takes a few minutes while images
 
 | Mode | How | What you get |
 |---|---|---|
-| Live (default) | `DATA_MODE=live` | Real feeds from adsb.lol, Celestrak, Open-Meteo and USGS, refreshed every 10 minutes. Needs internet. Air-traffic scores need about a day of history before they mean anything; until then they show "building baseline". |
+| Live (default) | `DATA_MODE=live` | Real feeds from OpenSky Network, adsb.fi, adsb.lol (including military), Celestrak, Open-Meteo (batched) and USGS, refreshed every 10 minutes with 3-day rolling retention (`RETENTION_DAYS=3`). Needs internet. Air-traffic scores need about a day of history before they mean anything; until then they show "building baseline". |
 | Demo | `DATA_MODE=demo` | A generated 8-day world that works offline and shows every feature immediately. It includes four scripted scenarios: a Red Sea surge with M6.1 and M5.8 quakes (Critical), a Taiwan Strait traffic drop (Elevated), a storm-explained drop in the Eastern Mediterranean (Watch), and a mild surge over Korea. |
 
 To switch modes, edit `.env` and run `docker compose up -d`. To regenerate the demo world, set `DEMO_RESET=1` for one start. To wipe everything, run `docker compose down -v`.
 
-Optional: set `ANTHROPIC_API_KEY` in `.env` to have Claude write the report assessments. Without a key, a built-in template writes them.
+Optional: set `ANTHROPIC_API_KEY` in `.env` to have Claude write the report assessments (without a key, a built-in template writes them), and `OPENSKY_CLIENT_ID` / `OPENSKY_CLIENT_SECRET` for OAuth2 access to OpenSky Network. A GitHub Actions keep-alive workflow (`.github/workflows/keep_alive.yml`) pings `/api/health` and triggers `/api/ingest/live` every 10 minutes for 24/7 hosted deployments (Render + Vercel + Supabase).
 
 | URL | |
 |---|---|
@@ -80,8 +80,8 @@ Optional: set `ANTHROPIC_API_KEY` in `.env` to have Claude write the report asse
 ## Architecture
 
 ```
- adsb.lol  Celestrak  Open-Meteo  USGS          (live mode, every 10 min)
-      \        |          |        /
+ OpenSky / adsb.fi / adsb.lol  Celestrak  Open-Meteo  USGS   (live mode, every 10 min)
+             \                    |          |        /
        app/data/live_connectors.py ──► PostGIS (observations, events)
                                             │
           app/services/series.py  hourly per-region series (cached 45 s)
@@ -127,7 +127,7 @@ cd ../frontend
 npm install && npm run dev           # http://localhost:5173, proxies /api to :8000
 ```
 
-Tests: `docker compose exec backend python -m pytest -q`. That runs 21 tests covering orbits, scoring, the anomaly engine, the explainer, and API integration.
+Tests: `docker compose exec backend python -m pytest -q`. That runs 32 tests (24 unit tests + 8 DB-backed API integration tests) covering orbits, scoring, the anomaly engine, the explainer, and API endpoints.
 
 ## Project layout
 
@@ -153,7 +153,7 @@ docs/DEMO_SCRIPT.md   4-minute walkthrough
 ## Limitations
 
 - **Live air-traffic history:** air-traffic scores need about a day of live history, and a full week for a reliable hour-of-day baseline.
-- **ADS-B coverage:** adsb.lol coverage depends on volunteer receivers, so oceanic regions see fewer aircraft.
+- **ADS-B coverage:** OpenSky Network, adsb.fi, and adsb.lol coverage depends on volunteer receivers (oceanic regions see fewer aircraft), and cloud datacenter IPs may be throttled by OpenSky, falling back to regional 250 nm adsb.fi / adsb.lol queries.
 - **Conflict & threat events:** events are USGS security and incident threat feeds inside monitored regions.
 - **Region shapes:** regions are simple latitude/longitude boxes and some overlap. A point belongs to the smallest box containing it.
 - **Short-term projection:** the projection is a linear trend on the last 12 hours, intended as a simple illustration rather than a forecast model.
