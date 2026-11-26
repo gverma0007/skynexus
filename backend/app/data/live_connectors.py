@@ -309,34 +309,34 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
     if opensky_count == 0:
         adsb_lol_limited = False
         for region_name, points in REGION_QUERY_POINTS.items():
-            lat, lon = points[0]
-            try:
-                res = client.get(f"https://opendata.adsb.fi/api/v2/lat/{lat}/lon/{lon}/dist/{ADSB_RADIUS_NM}")
-                if res.status_code == 200:
-                    data = res.json()
-                    _collect_adsb_items(
-                        aircraft_by_hex,
-                        data.get("aircraft") or data.get("ac") or [],
-                        "adsb.fi",
-                        shapes,
-                    )
-                    time.sleep(1.1)  # adsb.fi enforces ~1 req/s rate limit
-                    continue
-                logger.warning("adsb.fi %s -> HTTP %s", region_name, res.status_code)
-            except Exception as exc:
-                logger.warning("adsb.fi %s failed: %s", region_name, exc)
-
-            if not adsb_lol_limited:
+            for lat, lon in points[:3]:
                 try:
-                    res = client.get(f"https://api.adsb.lol/v2/point/{lat}/{lon}/{ADSB_RADIUS_NM}")
+                    res = client.get(f"https://opendata.adsb.fi/api/v2/lat/{lat}/lon/{lon}/dist/{ADSB_RADIUS_NM}")
                     if res.status_code == 200:
-                        _collect_adsb_items(aircraft_by_hex, res.json().get("ac", []) or [], "adsb.lol", shapes)
-                    elif res.status_code == 429:
-                        logger.warning("adsb.lol %s -> HTTP 429, skipping further adsb.lol calls", region_name)
-                        adsb_lol_limited = True
-                    time.sleep(1.0)
+                        data = res.json()
+                        _collect_adsb_items(
+                            aircraft_by_hex,
+                            data.get("aircraft") or data.get("ac") or [],
+                            "adsb.fi",
+                            shapes,
+                        )
+                        time.sleep(1.1)  # adsb.fi enforces ~1 req/s rate limit
+                        continue
+                    logger.warning("adsb.fi %s -> HTTP %s", region_name, res.status_code)
                 except Exception as exc:
-                    logger.warning("adsb.lol point %s failed: %s", (lat, lon), exc)
+                    logger.warning("adsb.fi %s failed: %s", region_name, exc)
+
+                if not adsb_lol_limited:
+                    try:
+                        res = client.get(f"https://api.adsb.lol/v2/point/{lat}/{lon}/{ADSB_RADIUS_NM}")
+                        if res.status_code == 200:
+                            _collect_adsb_items(aircraft_by_hex, res.json().get("ac", []) or [], "adsb.lol", shapes)
+                        elif res.status_code == 429:
+                            logger.warning("adsb.lol %s -> HTTP 429, skipping further adsb.lol calls", region_name)
+                            adsb_lol_limited = True
+                        time.sleep(1.0)
+                    except Exception as exc:
+                        logger.warning("adsb.lol point %s failed: %s", (lat, lon), exc)
     client.close()
 
     per_region: dict[str, int] = {}
