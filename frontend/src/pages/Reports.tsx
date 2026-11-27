@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { api } from '../lib/api';
+import { api, BASE, request } from '../lib/api';
+import type { ResearchArtifact } from '../lib/research-types';
 import type { MetricDelta, Region, Report } from '../lib/api';
 import { fmtDateTime, fmtNum, fmtPct } from '../lib/format';
 import { downloadText } from '../lib/download';
 import { go } from '../lib/router';
 import { usePoll } from '../lib/usePoll';
 import { Empty, ErrorNote, Skeleton } from '../components/ui';
+import Icon from '../components/Icon';
+import ResearchArtifacts from '../components/ResearchArtifacts';
+import ReportEvidence from '../components/ReportEvidence';
 
 interface Props {
   regions: Region[] | null;
@@ -86,8 +90,8 @@ export default function Reports({ regions, reportId, params }: Props) {
     <div className="page">
       <div className="pagehead no-print">
         <div>
-          <h1>What changed</h1>
-          <p>Compare a region's last hours with the same length of time just before.</p>
+          <h1>Research reports</h1>
+          <p>Trace observed changes, comparisons and alternative explanations back to the evidence.</p>
         </div>
       </div>
       <section className="panel form-row no-print" aria-label="New report">
@@ -110,7 +114,7 @@ export default function Reports({ regions, reportId, params }: Props) {
         </button>
         {oldHistory.data && (
           <div className="pad small muted" style={{ width: '100%', display: 'flex', gap: 16, flexWrap: 'wrap', borderTop: '1px solid var(--border)', paddingTop: 6, marginTop: 4 }}>
-            <span><b>Zone Historical Data (via API):</b> {oldHistory.data.baseline_hours} h baseline ({oldHistory.data.points.length} points)</span>
+            <span><b>Available history:</b> {oldHistory.data.baseline_hours} baseline hours ({oldHistory.data.points.length} observations)</span>
             <span>Latest: <b>{oldHistory.data.points[oldHistory.data.points.length - 1]?.aircraft ?? '–'}</b> aircraft/h</span>
             {oldHistory.data.points[oldHistory.data.points.length - 1]?.normal_range && (
               <span>Normal band: <b>{Math.round(oldHistory.data.points[oldHistory.data.points.length - 1].normal_range![0])}–{Math.round(oldHistory.data.points[oldHistory.data.points.length - 1].normal_range![1])}</b></span>
@@ -164,6 +168,10 @@ function row(m: MetricDelta, digits = 1) {
 }
 
 function ReportDoc({ report: r, history }: { report: Report; history?: { baseline_hours: number; points: any[] } | null }) {
+  const [archive, setArchive] = useState<ResearchArtifact[]>([]);
+  const [archiving, setArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState('');
+  useEffect(() => { setArchive([]); setArchiveError(''); }, [r.id]);
   const title = `${r.region.name}, last ${r.window_hours} hours`;
   const histData = history ?? r.historical_data;
   const md = () => [
@@ -173,11 +181,13 @@ function ReportDoc({ report: r, history }: { report: Report; history?: { baselin
     `| Disruption index | ${fmtNum(r.disruption_index.before)} | ${fmtNum(r.disruption_index.after)} | ${r.disruption_index.delta === null ? '–' : r.disruption_index.delta} |`,
     ...[r.aviation_metrics, r.events_metrics, r.weather_metrics, r.satellite_metrics].map(
       (m) => `| ${m.label} (${m.unit}) | ${fmtNum(m.before, 1)} | ${fmtNum(m.after, 1)} | ${fmtPct(m.delta_pct)} |`),
-    ...(r.flight_deviations ? [`| Flight corridor deviations | – | ${r.flight_deviations.deviating_flights} flights (max ${Math.round(r.flight_deviations.max_deviation_km)} km) | ${r.flight_deviations.significant_deviations > 0 ? 'significant' : 'nominal'} |`] : []),
+    ...(r.flight_deviations ? [`| Flight corridor deviations | – | ${r.flight_deviations.active_routes ? `${r.flight_deviations.deviating_flights} flights (max ${Math.round(r.flight_deviations.max_deviation_km)} km)` : 'Unavailable: verified routes required'} | ${r.flight_deviations.active_routes ? r.flight_deviations.significant_deviations > 0 ? 'significant' : 'no assessed deviation' : 'not assessed'} |`] : []),
     '', '## Assessment', '', r.overall_assessment, '',
-    ...(r.events_metrics.list.length ? ['## Conflict & War Threats in the window', '', ...r.events_metrics.list.map((e) => `- ${(e.description ?? '').replace(' earthquake — ', ', ').replace(/earthquake/gi, 'incident')} (${fmtDateTime(e.event_date)})`), ''] : []),
+    ...(r.events_metrics.list.length ? ['## Documented source events', '', ...r.events_metrics.list.map((e) => `- ${e.description ?? ''} (${fmtDateTime(e.event_date)})`), ''] : []),
     ...(histData?.points?.length ? ['## Historical Baseline (API retrieved)', '', `Baseline of ${histData.baseline_hours} hours across preceding period.`, ''] : []),
-    `_Data coverage ${fmtNum(r.confidence_pct)}%. Assessment written by ${r.ai_source === 'claude' ? 'Claude' : 'the built-in template'}._`,
+    `_Data coverage ${fmtNum(r.data_coverage_pct ?? r.confidence_pct)}%. Assessment written by ${r.ai_source === 'claude' ? 'Claude' : 'the built-in template'}._`,
+    '', '## Method and limitations', '', `Dataset: ${r.dataset_mode ?? 'source observations'}. Method: ${r.method_version ?? 'regional comparison'}.`, '',
+    r.confidence_definition ?? 'Coverage describes available data, not causal confidence.', '', ...(r.limitations ?? []).map((limitation) => `- ${limitation}`),
   ].join('\n');
 
   return (
@@ -190,17 +200,25 @@ function ReportDoc({ report: r, history }: { report: Report; history?: { baselin
           </p>
         </div>
         <div className="row-gap no-print">
-          <button className="btn" onClick={() => downloadText(`skynexus-${r.region.name.toLowerCase().replace(/\s+/g, '-')}-${r.window_hours}h.md`, md(), 'text/markdown')}>Download Markdown</button>
+          {r.id && <button className="btn" disabled={archiving} onClick={async () => { setArchiving(true); setArchiveError(''); try { const result = await request<{ artifacts: ResearchArtifact[] }>(`/reports/${r.id}/archive`, { method: 'POST' }); setArchive(result.artifacts); } catch (error) { setArchiveError(error instanceof Error ? error.message : 'Could not create the evidence archive.'); } finally { setArchiving(false); } }}>{archiving ? 'Creating archive…' : 'Create evidence archive'}<Icon name="sources" size={14} /></button>}
+          {r.id && <a className="btn" href={`${BASE}/reports/${r.id}/export?format=pdf`} download>Download PDF <Icon name="reports" size={14} /></a>}
+          {r.id && <a className="btn" href={`${BASE}/reports/${r.id}/export?format=json`} download>Evidence JSON</a>}
+          {r.id ? <a className="btn" href={`${BASE}/reports/${r.id}/export?format=markdown`} download>Markdown</a> : <button className="btn" onClick={() => downloadText(`skynexus-${r.region.name.toLowerCase().replace(/\s+/g, '-')}-${r.window_hours}h.md`, md(), 'text/markdown')}>Download Markdown</button>}
           <button className="btn" onClick={() => window.print()}>Print or save as PDF</button>
         </div>
       </header>
+      {archiveError && <ErrorNote message={archiveError} />}
+      <ResearchArtifacts artifacts={archive} />
+      <div className="report-evidence-strip"><span><Icon name="shield" size={15} />{r.evidence_support?.replaceAll('_', ' ') ?? 'Statistical association · unvalidated'}</span><span>Coverage {fmtNum(r.data_coverage_pct ?? r.confidence_pct)}%</span><span>{r.dataset_mode === 'demo' ? 'Synthetic scenario' : r.dataset_mode ?? 'Source observations'}</span></div>
+      <nav className="report-sections no-print" aria-label="Report sections">{[['report-changes', 'What changed'], ['report-assessment', 'Assessment'], ['report-provenance', 'Methods & limitations']].map(([id, label]) => <a key={id} href={`#${id}`} onClick={(event) => { event.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' }); }}>{label}</a>)}</nav>
+      <h3 id="report-changes" className="report-section-title">What changed</h3>
       <div className="metric index-row">
         <b>Disruption index</b>
         <span><span className="muted num">{fmtNum(r.disruption_index.before)}</span>&nbsp; to &nbsp;<b className="num">{fmtNum(r.disruption_index.after)}</b><span className="muted small"> of 100</span></span>
         <span className="delta num">{r.disruption_index.delta === null ? '–' : `${r.disruption_index.delta > 0 ? '+' : ''}${Math.round(r.disruption_index.delta)}`}</span>
       </div>
       {row(r.aviation_metrics)}
-      {r.flight_deviations && (
+      {r.flight_deviations && r.flight_deviations.active_routes > 0 && (
         <div className="metric">
           <b>Flight corridor deviations</b>
           <span>
@@ -211,13 +229,16 @@ function ReportDoc({ report: r, history }: { report: Report; history?: { baselin
           </span>
         </div>
       )}
+      {r.flight_deviations && !r.flight_deviations.active_routes && <div className="metric"><b>Flight corridor deviations</b><span className="muted small">Unavailable: no verified route endpoints in this window.</span><span className="delta muted small">Not assessed</span></div>}
       {row(r.events_metrics, 0)}
       {row(r.weather_metrics)}
       {row(r.satellite_metrics, 0)}
+      <h3 id="report-assessment" className="report-section-title">Assessment</h3>
       <p className="assess">{r.overall_assessment.replace(/\s*Correlation does not establish causation\.\s*$/, '')}</p>
+      <ReportEvidence report={r} />
       {histData && histData.points?.length > 0 && (
         <div className="doc-events">
-          <h4>Old / Historical Zone Data (retrieved via API)</h4>
+          <h4>Observation history and expected range</h4>
           <p className="muted small m0" style={{ marginBottom: 8 }}>
             Baseline of {histData.baseline_hours} hours. Past observations across the comparison window:
           </p>
@@ -235,13 +256,15 @@ function ReportDoc({ report: r, history }: { report: Report; history?: { baselin
       )}
       {r.events_metrics.list.length > 0 && (
         <div className="doc-events">
-          <h4>Conflict & Security Incidents in this window</h4>
-          <ul>{r.events_metrics.list.map((e) => <li key={e.event_date + e.magnitude}>{(e.description ?? '').replace(' earthquake — ', ', ').replace(/^M[\d.]+ earthquake — /, 'Incident: ')} <span className="muted">({fmtDateTime(e.event_date)})</span></li>)}</ul>
+          <h4>Documented source events in this window</h4>
+          <ul>{r.events_metrics.list.map((e) => <li key={e.event_date + e.magnitude}>{e.description ?? ''} <span className="muted">({fmtDateTime(e.event_date)})</span></li>)}</ul>
         </div>
       )}
+      <section id="report-provenance" className="report-provenance"><h3 className="report-section-title">Methods & limitations</h3><p>{r.confidence_definition ?? 'Data coverage describes available observations. It is not a probability that an explanation is correct.'}</p>{r.method_version && <p>Method version: {r.method_version}</p>}{r.limitations?.length ? <ul>{r.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}</ul> : <p>Baselines, coverage and source publication delays limit interpretation. Forecasts require independent validation.</p>}</section>
+      <ResearchArtifacts artifacts={r.artifacts} />
       <div className="disc">
         Correlation does not establish causation. Figures are statistical deviations from public data feeds.
-        Data coverage {fmtNum(r.confidence_pct)}%. Written by {r.ai_source === 'claude' ? 'Claude from the computed figures' : 'the built-in template (add an Anthropic API key for AI-written text)'}.
+        Data coverage {fmtNum(r.data_coverage_pct ?? r.confidence_pct)}%. Written by {r.ai_source === 'claude' ? 'Claude from the computed figures' : 'the deterministic assessment template'}.
       </div>
     </article>
   );

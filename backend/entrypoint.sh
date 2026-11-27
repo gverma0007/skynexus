@@ -2,6 +2,11 @@
 # Prepare the database, then start the API.
 set -e
 
+if [ "${STARTUP_PREPARE:-true}" = "false" ]; then
+  echo "[skynexus] starting prepared application"
+  exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" --proxy-headers
+fi
+
 echo "[skynexus] waiting for the database..."
 python - <<'PY'
 import os, sys, time
@@ -16,17 +21,27 @@ for attempt in range(60):
         print("[skynexus] database connection successful!", flush=True)
         sys.exit(0)
     except Exception as exc:
-        print(f"  database not ready ({exc.__class__.__name__}: {exc}), retrying...", flush=True)
+        print(f"  database not ready ({exc.__class__.__name__}), retrying...", flush=True)
         time.sleep(2)
 sys.exit("database never became available")
 PY
 
+echo "[skynexus] ensuring geospatial extensions..."
+python - <<'PYINIT'
+import os, psycopg2
+with psycopg2.connect(os.environ['DATABASE_URL']) as c:
+    with c.cursor() as cur:
+        cur.execute('CREATE EXTENSION IF NOT EXISTS postgis')
+        cur.execute('CREATE EXTENSION IF NOT EXISTS pgcrypto')
+PYINIT
 echo "[skynexus] applying migrations..."
 alembic upgrade head
 
 echo "[skynexus] seeding regions and airports..."
 python -m app.data.seed_regions
 python -m app.data.seed_airports
+python -m app.data.seed_study_regions
+python -m app.data.seed_exposure_demo
 
 MODE="${DATA_MODE:-live}"
 if [ "$MODE" = "demo" ]; then
@@ -39,8 +54,9 @@ if [ "$MODE" = "demo" ]; then
   fi
 else
   echo "[skynexus] live mode: removing any demo rows"
-  python -m app.data.seed_airports --purge-synthetic
-  python -m app.data.seed_satellites
+  # Keep source-isolated synthetic records available to viewer replay.
+  # Source-isolated synthetic data is available without altering live records.
+  python -m app.data.ensure_demo
 fi
 
 PORT="${PORT:-8000}"

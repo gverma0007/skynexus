@@ -23,7 +23,7 @@ from app.models.aviation import Region, Airport
 # falling back to the URL in alembic.ini. Force the psycopg2 driver,
 # which is the one installed in requirements.txt.
 _db_url = os.getenv("DATABASE_URL") or config.get_main_option("sqlalchemy.url")
-config.set_main_option("sqlalchemy.url", normalize_db_url(_db_url))
+config.set_main_option("sqlalchemy.url", normalize_db_url(_db_url).replace('%', '%%'))
 
 # add your model's MetaData object here
 # for 'autogenerate' support

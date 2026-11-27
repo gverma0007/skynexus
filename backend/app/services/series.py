@@ -80,6 +80,9 @@ def magnitude_of(description: str | None, severity: str | None) -> float:
 
 
 def get_series(db: Session, now: datetime | None = None) -> SeriesBundle:
+    from app.core.config import request_mode, request_as_of
+    if request_mode.get() or request_as_of.get():
+        return _build(db, now if now is not None else request_as_of.get())
     if now is None:
         cached = _bundle_cache.get()
         if cached is not None:
@@ -116,11 +119,11 @@ def _build(db: Session, now: datetime | None) -> SeriesBundle:
 
     flight_rows = db.execute(text(
         f"""
-        SELECT fr.region_id::text, date_trunc('hour', fo.timestamp) AS hr,
+        SELECT fr.id::text, date_trunc('hour', fo.timestamp) AS hr,
                COUNT(DISTINCT fo.icao24)
         FROM flight_observations fo
-        JOIN flight_routes fr ON fr.id = fo.route_id
-        WHERE fo.timestamp >= :start AND fo.timestamp <= :now AND fr.region_id IS NOT NULL {src_fo}
+        JOIN regions fr ON ST_Contains(fr.geom, fo.position)
+        WHERE fo.timestamp >= :start AND fo.timestamp <= :now AND fr.id IS NOT NULL {src_fo}
         GROUP BY 1, 2
         """
     ), {"start": start, "now": now}).all()
@@ -159,10 +162,10 @@ def _build(db: Session, now: datetime | None) -> SeriesBundle:
                COUNT(DISTINCT so.satellite_id)
         FROM satellite_observations so
         JOIN regions r ON so.position && r.geom AND ST_Contains(r.geom, ST_Force2D(so.position))
-        WHERE so.timestamp >= :start AND so.timestamp <= :now
+        WHERE so.timestamp >= :start AND so.timestamp <= :now AND so.source = :sat_source
         GROUP BY 1, 2
         """
-    ), {"start": start, "now": now}).all()
+    ), {"start": start, "now": now, "sat_source": "demo_dataset" if mode == "demo" else "celestrak"}).all()
 
     dev_rows = db.execute(text(
         f"""

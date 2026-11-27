@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: skynexus-web
+    runtime: docker
+    plan: standard
+    healthCheckPath: /api/health
+    envVars: &shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: skynexus-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: skynexus-events
+          type: keyvalue
+          property: connectionString
+      - key: DEMO_EMAIL
+        value: demo@skynexus.local
+      - key: DEMO_PASSWORD_HASH
+        sync: false
+      - key: ENV
+        value: production
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: LIVE_INGEST
+        value: "0"
+  - type: worker
+    name: skynexus-ingestion
+    runtime: docker
+    plan: standard
+    dockerCommand: python -m app.worker
+    envVars: *shared
+  - type: worker
+    name: skynexus-analysis
+    runtime: docker
+    plan: standard
+    dockerCommand: /bin/sh -c 'rq worker research --url "$REDIS_URL"'
+    envVars: *shared
+  - type: keyvalue
+    name: skynexus-events
+    plan: starter
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+databases:
+  - name: skynexus-db
+    plan: basic-1gb
+    postgresMajorVersion: "16"
+    ipAllowList: []

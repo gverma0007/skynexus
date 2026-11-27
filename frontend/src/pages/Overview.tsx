@@ -11,8 +11,12 @@ import { usePoll } from '../lib/usePoll';
 import RegionPanel from '../components/RegionPanel';
 import FlightPanel from '../components/FlightPanel';
 import { Diamond, Empty, ErrorNote, Skeleton, Sparkline, Swatch } from '../components/ui';
+import Icon from '../components/Icon';
+import EarthWindow from '../components/EarthWindow';
+import { PageHeader } from './Research';
 
 interface Props {
+  explore?: boolean;
   regions: Region[] | null;
   regionsError: string | null;
   outlines: Outline[] | null;
@@ -24,6 +28,9 @@ const LEGEND: { label: string; level: 0 | 1 | 2 | 3 }[] = [
 ];
 
 export function headline(regions: Region[]): { title: string; sub: string } {
+  if (!regions.length) return { title: 'Waiting for regional observations', sub: 'Coverage appears after the first successful collection.' };
+  const building = regions.filter((r) => r.components.flights.warming_up).length;
+  if (building === regions.length) return { title: 'Building the regional picture', sub: 'Traffic baselines are still forming. Source observations and documented events remain available to inspect.' };
   const crit = regions.filter((r) => r.status === 'Critical');
   const elev = regions.filter((r) => r.status === 'Elevated');
   const n = crit.length + elev.length;
@@ -45,7 +52,7 @@ export function headline(regions: Region[]): { title: string; sub: string } {
   };
 }
 
-export default function Overview({ regions, regionsError, outlines, selectedId }: Props) {
+export default function Overview({ regions, regionsError, outlines, selectedId, explore = false }: Props) {
   const flights = usePoll(() => api.flights(3000), 60_000);
   const sats = usePoll(api.satellites, 30_000);
   const events = usePoll(() => api.events({ days: 7 }), 120_000);
@@ -87,7 +94,7 @@ export default function Overview({ regions, regionsError, outlines, selectedId }
   })), [sats.data]);
   const gEvents: GlobeEvent[] = useMemo(() => (events.data ?? []).map((e) => ({
     id: e.id, lat: e.lat, lon: e.lon, mag: e.magnitude,
-    label: `${(e.description ?? e.event_type).replace(' earthquake — ', ', ').replace(/earthquake/gi, 'incident')}, ${timeAgo(e.event_date)}`,
+      label: `${e.description ?? e.event_type}, ${timeAgo(e.event_date)}`,
   })), [events.data]);
 
   const focus = selected ? { lat: selected.lat, lon: selected.lon, key: selected.region_id } : null;
@@ -97,7 +104,9 @@ export default function Overview({ regions, regionsError, outlines, selectedId }
   const toggle = (k: keyof Layers) => setLayers((l) => ({ ...l, [k]: !l[k] }));
 
   return (
-    <div className={`ov ${selected ? 'has-sel' : ''}`}>
+    <div className={`overview-page ${explore ? 'explore-page' : ''}`}>
+      <PageHeader title={explore ? 'Explore the connected world' : 'Your regional outlook'} description={explore ? 'Rotate, inspect and follow the evidence across monitored regions.' : 'A clear view of changing activity, available evidence, and what needs a closer look.'} action={<a className="btn" href="#/sources"><Icon name="sources" size={15} />Source coverage</a>} />
+      <div className={`ov ${selected ? 'has-sel' : ''}`}>
       <section className="panel ov-left" aria-label="Regions">
         <div className="headline">
           {hl ? (<><h1>{hl.title}</h1><p>{hl.sub}</p></>) : regionsError ? null : <Skeleton rows={3} />}
@@ -108,7 +117,7 @@ export default function Overview({ regions, regionsError, outlines, selectedId }
             <button role="tab" aria-selected={filter === 'all'} className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>All regions</button>
             <button role="tab" aria-selected={filter === 'watch'} className={filter === 'watch' ? 'on' : ''} onClick={() => setFilter('watch')}>Watchlist {watched.size > 0 && <em>{watched.size}</em>}</button>
           </div>
-          <span className="ph-aside">Index 0–100</span>
+          <span className="ph-aside">Heuristic index 0–100</span>
         </div>
         <div className="rlist">
           {list.map((r) => (
@@ -128,7 +137,7 @@ export default function Overview({ regions, regionsError, outlines, selectedId }
         </div>
       </section>
 
-      <section className="panel globewrap" aria-label="Globe">
+      <EarthWindow>
         <Globe regions={globeRegions} flights={gFlights} sats={gSats} events={gEvents} layers={layers}
           selectedRegion={selectedId} selectedSat={null} focus={focus}
           onSelectRegion={(id) => select(id)} onSelectSat={(id) => go('satellites', id)}
@@ -138,7 +147,7 @@ export default function Overview({ regions, regionsError, outlines, selectedId }
           <div className="legend-sep" />
           <div><span className="lg-tick" />Aircraft</div>
           <div><span className="lg-ring" />Satellite</div>
-          <div><span className="dia" />Conflict / Threat</div>
+          <div><span className="dia" />Source event</div>
         </div>
         <div className="layers" role="group" aria-label="Layers">
           <button className={`chip ${layers.aircraft ? 'on' : ''}`} aria-pressed={layers.aircraft} onClick={() => toggle('aircraft')}>
@@ -148,14 +157,14 @@ export default function Overview({ regions, regionsError, outlines, selectedId }
             Satellites <em>{fmtNum(sats.data?.length)}</em>
           </button>
           <button className={`chip ${layers.events ? 'on' : ''}`} aria-pressed={layers.events} onClick={() => toggle('events')}>
-            Conflict Alerts <em>{fmtNum(events.data?.length)}</em>
+            Events <em>{fmtNum(events.data?.length)}</em>
           </button>
           <button className={`chip ${layers.outlines ? 'on' : ''}`} aria-pressed={layers.outlines} onClick={() => toggle('outlines')}>
             Regions
           </button>
         </div>
-        <p className="globe-hint">Drag to rotate, scroll to zoom, click an aircraft, region, or satellite.</p>
-      </section>
+        <p className="globe-hint">Drag to explore. Select a region or object for its evidence.</p>
+      </EarthWindow>
 
       <section className="panel ov-right" aria-label="Details">
         {selectedFlightIcao ? (
@@ -166,6 +175,7 @@ export default function Overview({ regions, regionsError, outlines, selectedId }
           <WorldPanel regions={regions} events={events.data} onSelectFlight={(icao) => setSelectedFlightIcao(icao)} />
         )}
       </section>
+      </div>
     </div>
   );
 }
@@ -209,7 +219,7 @@ function WorldPanel({ regions, events, onSelectFlight }: {
               {Math.abs(f.deviation?.cross_track_km ?? 0)} km {f.deviation?.side}
             </span>
           </button>
-        )) : <p className="muted small m0">{deviations.data ? 'All monitored aircraft on route corridor.' : 'Loading…'}</p>}
+        )) : <p className="muted small m0">{deviations.data ? 'No deviations are available from verified route information. Unknown routes cannot be assessed.' : 'Loading…'}</p>}
       </div>
       <div className="sec">
         <h4>Unusual hours, last 24 h</h4>
@@ -222,11 +232,11 @@ function WorldPanel({ regions, events, onSelectFlight }: {
         )) : <p className="muted small m0">{anomalies.data ? 'Nothing unusual flagged.' : 'Loading…'}</p>}
       </div>
       <div className="sec">
-        <h4>Conflict & War Activity</h4>
+        <h4>Documented source events</h4>
         {events?.length ? events.slice(0, 5).map((e) => (
           <div className="ev" key={e.id}>
             <Diamond mag={e.magnitude} />
-            <span>{(e.description ?? e.event_type).replace(' earthquake — ', ', ').replace(/^M[\d.]+ earthquake — /, 'Incident: ')} <span className="muted">({e.region_name})</span></span>
+              <span>{e.description ?? e.event_type} <span className="muted">({e.region_name})</span></span>
             <span className="muted small nowrap">{timeAgo(e.event_date)}</span>
           </div>
         )) : <p className="muted small m0">{events ? 'None inside monitored regions.' : 'Loading…'}</p>}

@@ -1,25 +1,10 @@
-import { useState } from 'react';
 import { api } from '../lib/api';
 import { fmtDuration, fmtNum, timeAgo } from '../lib/format';
 import { usePoll } from '../lib/usePoll';
 import { ErrorNote, Skeleton } from '../components/ui';
 
 export default function System() {
-  const [fast, setFast] = useState(false);
-  const h = usePoll(api.system, fast ? 3_000 : 30_000, [fast]);
-  const [msg, setMsg] = useState<string | null>(null);
-
-  const run = async () => {
-    setMsg(null);
-    try {
-      const r = await api.runIngest();
-      setMsg(r.status === 'started' ? 'Ingest started. This page updates when it finishes.' : 'An ingest cycle is already running.');
-      setFast(true);
-      setTimeout(() => setFast(false), 180_000);
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Could not start ingest');
-    }
-  };
+  const h = usePoll(api.system, 30_000);
 
   if (h.error && !h.data) return <div className="page"><ErrorNote message={h.error} onRetry={h.refresh} /></div>;
   if (!h.data) return <div className="page"><Skeleton rows={8} /></div>;
@@ -34,11 +19,8 @@ export default function System() {
           <h1>System</h1>
           <p>Where the data comes from and whether it is arriving.</p>
         </div>
-        <button className="btn primary" onClick={run} disabled={st.running}>
-          {st.running ? 'Running…' : isDemo ? 'Rerun analysis now' : 'Run ingest now'}
-        </button>
+        <button className="btn" onClick={h.refresh}>Refresh status</button>
       </div>
-      {msg && <p className="note mb16" role="status">{msg}</p>}
 
       <div className="facts">
         <div className="panel fact">
@@ -64,7 +46,7 @@ export default function System() {
       </div>
 
       <section className="panel table-wrap mt16">
-        <div className="ph"><h3>Data sources</h3><span className="ph-aside">All free and key-less</span></div>
+        <div className="ph"><h3>Data sources</h3><span className="ph-aside">Provider coverage and credentials vary</span></div>
         <table>
           <thead><tr><th>Source</th><th>Provides</th><th>Status</th><th className="r">Rows, 24 h</th><th className="r hide-sm">Rows stored</th><th>Last data</th></tr></thead>
           <tbody>

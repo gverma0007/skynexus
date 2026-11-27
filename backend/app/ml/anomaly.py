@@ -14,8 +14,8 @@ complete hours we compute:
 
 composite = 0.5 * z_scaled + 0.5 * iforest_scaled.
 
-Weather is ruled out first: route deviations during a storm (storm >= 35) are
-labelled weather-explained and severity is capped at "low".
+Route deviations during a storm (storm >= 35) are labelled weather-coincident.
+Co-occurrence does not establish cause or reduce the measured disturbance severity.
 
 Rows with composite >= 50 and (|z| >= 2 or Isolation Forest >= 85) are written to anomaly_scores (idempotent per
 region and hour).
@@ -86,12 +86,8 @@ def score_region(rs: RegionSeries) -> list[dict]:
     if base_mask.sum() < MIN_BASELINE_ROWS:
         base_mask = np.array([i < end_idx - LOOKBACK_HOURS for i in idx])
 
-    # If still fewer than 4 hours of history, use available points with cautious floors
-    if base_mask.sum() < 4:
-        base = X if len(X) > 0 else np.array([[10.0, 20.0, 10.0]])
-        mean = base.mean(axis=0)
-        std = np.maximum(base.std(axis=0), np.maximum(0.15 * np.abs(mean), [2.0, 15.0, 5.0]))
-        model = None
+    if base_mask.sum() < MIN_BASELINE_ROWS:
+        return []  # A cold start cannot supply an independent prior baseline.
     else:
         base = X[base_mask]
         mean = base.mean(axis=0)
@@ -108,7 +104,7 @@ def score_region(rs: RegionSeries) -> list[dict]:
         z_dom = float(z[dom])
         z_scaled = float(min(100.0, abs(z_dom) / 3.0 * 100.0))
 
-        # Multivariate compound deviation with heightened war/conflict weighting
+        # Multivariate compound deviation; weights are research heuristics
         feature_weights = np.array([1.3, 1.3, 0.7])
         norm_z = float(np.linalg.norm(z * feature_weights))
         norm_scaled = float(min(100.0, norm_z / 3.5 * 100.0))
@@ -130,35 +126,9 @@ def score_region(rs: RegionSeries) -> list[dict]:
             feature = FEATURES[dom]
 
         sev = severity_for(composite)
-        # Weather correlation check: if flight deviations increase during heavy weather, mark as weather-explained
+        # Preserve disturbance magnitude while recording weather coincidence.
         if z[1] > 1.0 and row[2] >= 35.0:
-            feature = "flight_route_deviation (weather-explained)"
-            sev = "low" if composite >= STORE_THRESHOLD else "normal"
-        # War & Conflict detection: flight corridor avoidance & satellite reconnaissance surges in clear weather
-        elif z[1] > 1.2 and z[0] > 1.0 and row[2] < 35.0:
-            feature = "war_conflict_early_warning"
-            conflict_risk_boost = min(45.0, 25.0 + 10.0 * max(0.0, z[1] - 1.2) + 8.0 * max(0.0, z[0] - 1.0))
-            composite = min(100.0, composite + conflict_risk_boost)
-            sev = "high" if composite >= 55.0 else "medium"
-        elif z[1] > 1.8 and row[2] < 30.0:
-            feature = "airspace_conflict_evasion"
-            conflict_risk_boost = min(40.0, 20.0 + 9.0 * max(0.0, z[1] - 1.8))
-            composite = min(100.0, composite + conflict_risk_boost)
-            sev = "high" if composite >= 60.0 else "medium"
-        elif z[0] > 2.0 and row[2] < 35.0:
-            feature = "orbital_reconnaissance_surge"
-            conflict_risk_boost = min(35.0, 15.0 + 7.0 * max(0.0, z[0] - 2.0))
-            composite = min(100.0, composite + conflict_risk_boost)
-            sev = "high" if composite >= 60.0 else "medium"
-
-        # Direct war & conflict incident risk integration into anomaly composite score
-        if hasattr(rs, "events") and rs.events and i < len(rs.events) and rs.events[i] > 0:
-            inc_cnt = rs.events[i]
-            inc_mag = rs.max_mag[i] if hasattr(rs, "max_mag") and i < len(rs.max_mag) else 0.0
-            war_incident_boost = min(35.0, 10.0 * inc_cnt + 4.0 * max(0.0, inc_mag - 2.0))
-            composite = min(100.0, composite + war_incident_boost)
-            sev = severity_for(composite)
-
+            feature = "flight_route_deviation (weather-coincident)"
         out.append({
             "region_id": rs.region_id,
             "timestamp": rs.hours[i] + timedelta(minutes=30),
@@ -221,12 +191,6 @@ def describe(row: dict) -> str:
     feat = row["feature_name"]
     z = row.get("z_score") or 0
     direction = "above" if z > 0 else "below"
-    if feat.startswith("war_conflict_early_warning"):
-        return f"War & conflict early warning: abnormal satellite reconnaissance surge and civilian airspace diversion in clear weather (|z|={abs(z):.1f})"
-    if feat.startswith("airspace_conflict_evasion"):
-        return f"Airspace conflict evasion: aircraft diverting {abs(z):.1f} std off corridors in clear weather (potential combat/NOTAM zone)"
-    if feat.startswith("orbital_reconnaissance_surge"):
-        return f"Tactical orbital reconnaissance surge: satellite concentration {abs(z):.1f} std above baseline (pre-conflict staging)"
     if "&" in feat:
         return f"Compound anomaly ({feat}) with |z|={abs(z):.1f}"
     if feat.startswith("satellite"):

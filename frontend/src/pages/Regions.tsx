@@ -63,7 +63,7 @@ export default function Regions({ regions, error }: { regions: Region[] | null; 
     downloadText(`skynexus-regions-${stamp()}.csv`, toCsv(rows.map((r) => ({
       region: r.region_name, status: r.status, index: r.composite_index, change_24h: r.change_24h,
       air_traffic_score: r.flight_anomaly_score, air_traffic_vs_normal_pct: r.components.flights.pct_change,
-      aircraft_per_hour: r.components.flights.recent, conflict_incidents_24h: r.components.events.count_24h,
+      aircraft_per_hour: r.components.flights.recent, source_events_24h: r.components.events.count_24h,
       largest_magnitude: r.components.events.max_magnitude, storm_index: r.components.weather.storm_now,
     }))), 'text/csv');
   };
@@ -98,7 +98,7 @@ export default function Regions({ regions, error }: { regions: Region[] | null; 
               {th('index', 'Index', 'r')}
               {th('change', 'Change 24 h', 'r hide-sm')}
               {th('traffic', 'Flight deviation')}
-              {th('quakes', 'War Risk / Incidents', 'r hide-sm')}
+              {th('quakes', 'Source events', 'r hide-sm')}
               {th('storm', 'Storm', 'r hide-sm')}
               <th className="hide-sm">Last 24 h</th>
               <th className="w70">Compare</th>
@@ -124,7 +124,7 @@ export default function Regions({ regions, error }: { regions: Region[] | null; 
                   <td className="r num hide-sm">{r.change_24h === null ? '–' : signed(r.change_24h)}</td>
                   <td>
                     <span className="mbar"><i style={{ width: `${r.flight_anomaly_score}%` }} /></span>
-                    <span className="num small">{f.route_deviations?.significant_count ? `${f.route_deviations.significant_count} dev` : (f.score === 0 ? 'nominal' : `${Math.round(f.score)}%`)}</span>
+                    <span className="num small">{!f.route_deviations?.count ? 'Unavailable' : f.route_deviations.significant_count ? `${f.route_deviations.significant_count} dev` : (f.score === 0 ? 'nominal' : `${Math.round(f.score)}%`)}</span>
                   </td>
                   <td className="r num hide-sm">{r.components.events.count_24h}{r.components.events.max_magnitude ? <span className="muted small"> (max M{r.components.events.max_magnitude.toFixed(1)})</span> : null}</td>
                   <td className="r num hide-sm">{fmtNum(r.components.weather.storm_now)}</td>
@@ -159,8 +159,8 @@ export default function Regions({ regions, error }: { regions: Region[] | null; 
               <div key={r.region_id}>
                 <div className="cmp-head"><b>{r.region_name}</b><StatusBadge status={r.status} /></div>
                 <div className="score sm"><b className="num">{Math.round(r.composite_index)}</b></div>
-                <Bar label="Flight dev" value={r.flight_anomaly_score} display={r.components.flights.route_deviations?.significant_count ? `${r.components.flights.route_deviations.significant_count} dev` : 'nominal'} />
-                <Bar label="War & Conflict risk" value={r.event_relevance_score} display={String(r.components.events.count_24h)} />
+                <Bar label="Flight dev" value={r.flight_anomaly_score} display={!r.components.flights.route_deviations?.count ? 'Unavailable' : r.components.flights.route_deviations.significant_count ? `${r.components.flights.route_deviations.significant_count} dev` : 'nominal'} />
+                <Bar label="Documented source events" value={r.event_relevance_score} display={String(r.components.events.count_24h)} />
                 <Bar label="Storm" value={r.weather_score} display={fmtNum(r.components.weather.storm_now)} />
                 {r.satellite_score !== undefined && (
                   <Bar label="Satellites" value={r.satellite_score} display={`${r.components?.satellites?.count ?? 0} sat`} />

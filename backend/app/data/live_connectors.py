@@ -234,6 +234,7 @@ def _collect_adsb_items(
             "heading_deg": float(ac.get("track") or 0.0),
             "source": source,
             "region_id": reg["id"],
+                    "observed_at": datetime.fromtimestamp(s[3], timezone.utc) if isinstance(s[3], (int, float)) else now,
         }
         added += 1
     return added
@@ -245,12 +246,6 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
     from app.services.geo import region_for, region_shapes
 
     shapes = region_shapes(db)
-    routes = {}
-    for region in db.query(Region).all():
-        route = _route_for(db, region)
-        if route is not None:
-            routes[str(region.id)] = route
-
     aircraft_by_hex: dict[str, dict] = {}
     now = datetime.now(timezone.utc)
     client = httpx.Client(timeout=35, headers=UA)
@@ -295,48 +290,9 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
     except Exception as exc:
         logger.warning("OpenSky fetch failed: %s", exc)
 
-    # 2. Worldwide military and patrol aircraft (free, keyless)
-    try:
-        m_res = client.get("https://api.adsb.lol/v2/mil")
-        if m_res.status_code == 200:
-            _collect_adsb_items(aircraft_by_hex, m_res.json().get("ac", []) or [], "adsb.lol-mil", shapes, "MIL")
-        elif m_res.status_code == 429:
-            logger.warning("adsb.lol /mil returned 429 rate limit")
-    except Exception as exc:
-        logger.warning("adsb.lol /mil failed: %s", exc)
-
-    # 3. Regional ADS-B fallback across all regions whenever OpenSky didn't deliver
+    # No uncontrolled multi-provider fanout: preserve free-provider daily quotas.
     if opensky_count == 0:
-        adsb_lol_limited = False
-        for region_name, points in REGION_QUERY_POINTS.items():
-            for lat, lon in points[:3]:
-                try:
-                    res = client.get(f"https://opendata.adsb.fi/api/v2/lat/{lat}/lon/{lon}/dist/{ADSB_RADIUS_NM}")
-                    if res.status_code == 200:
-                        data = res.json()
-                        _collect_adsb_items(
-                            aircraft_by_hex,
-                            data.get("aircraft") or data.get("ac") or [],
-                            "adsb.fi",
-                            shapes,
-                        )
-                        time.sleep(1.1)  # adsb.fi enforces ~1 req/s rate limit
-                        continue
-                    logger.warning("adsb.fi %s -> HTTP %s", region_name, res.status_code)
-                except Exception as exc:
-                    logger.warning("adsb.fi %s failed: %s", region_name, exc)
-
-                if not adsb_lol_limited:
-                    try:
-                        res = client.get(f"https://api.adsb.lol/v2/point/{lat}/{lon}/{ADSB_RADIUS_NM}")
-                        if res.status_code == 200:
-                            _collect_adsb_items(aircraft_by_hex, res.json().get("ac", []) or [], "adsb.lol", shapes)
-                        elif res.status_code == 429:
-                            logger.warning("adsb.lol %s -> HTTP 429, skipping further adsb.lol calls", region_name)
-                            adsb_lol_limited = True
-                        time.sleep(1.0)
-                    except Exception as exc:
-                        logger.warning("adsb.lol point %s failed: %s", (lat, lon), exc)
+        res.raise_for_status() if 'res' in locals() else None
     client.close()
 
     per_region: dict[str, int] = {}
@@ -347,12 +303,12 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
             continue
         if per_region.get(reg_id, 0) >= max_per_region:
             continue
-        route = routes.get(reg_id)
+        route = None  # A regional hub is not a verified aircraft route.
         new_obs.append(FlightObservation(
             route_id=route.id if route else None,
             callsign=ac["callsign"][:64] or "UNKNOWN",
             icao24=hex_id[:64],
-            timestamp=now,
+            timestamp=ac.get("observed_at", now),
             position=point_to_wkt(ac["lon"], ac["lat"]),
             altitude_ft=ac["alt_ft"],
             speed_kt=ac["speed_kt"],
@@ -372,54 +328,27 @@ def fetch_live_flights(db: Session, max_per_region: int = ADSB_MAX_PER_REGION) -
 def _fetch_group_tles(
     max_per_group: dict[str, tuple[int, str]]
 ) -> list[tuple[str, int, str, str, str]]:
-    """Fetch (name, norad, l1, l2, category) from Celestrak groups, cached 12h."""
-    combined: list[tuple[str, int, str, str, str]] = []
-    seen: set[int] = set()
-    client = httpx.Client(timeout=8, headers=UA)
-    try:
+    """Fetch modern GP CSV records, cached for two hours; never truncate catalogue IDs."""
+    import csv, io, json
+    combined, seen = [], set()
+    with httpx.Client(timeout=20, headers=UA) as client:
         for group, (take, category) in max_per_group.items():
-            cache = CACHE_DIR / f"group_{group}.txt"
-            lines: list[str] = []
-            if cache.exists() and (
-                datetime.now().timestamp() - cache.stat().st_mtime
-            ) < 12 * 3600:
-                lines = cache.read_text().splitlines()
+            cache = CACHE_DIR / f"group_{group}.csv"
+            if cache.exists() and datetime.now().timestamp()-cache.stat().st_mtime < 7200:
+                content=cache.read_text()
             else:
-                try:
-                    res = client.get(
-                        f"https://celestrak.org/NORAD/elements/gp.php?GROUP={group}&FORMAT=TLE"
-                    )
-                    if res.status_code == 200 and "1 " in res.text:
-                        lines = res.text.splitlines()
-                        cache.write_text("\n".join(lines))
-                    else:
-                        logger.warning(
-                            "Celestrak group %s -> HTTP %s", group, res.status_code
-                        )
-                except Exception as exc:
-                    logger.warning("Celestrak group %s failed: %s", group, exc)
-
-            # Parse 3-line records: name / line1 / line2
-            taken = 0
-            i = 0
-            while i + 2 < len(lines) and taken < take:
-                name = lines[i].strip()
-                l1 = lines[i + 1].strip()
-                l2 = lines[i + 2].strip()
-                i += 3
-                if not l1.startswith("1 ") or not l2.startswith("2 "):
-                    continue
-                try:
-                    norad = int(l1[2:7])
-                except ValueError:
-                    continue
-                if norad in seen or not name:
-                    continue
+                response=client.get('https://celestrak.org/NORAD/elements/gp.php',params={'GROUP':group,'FORMAT':'csv'})
+                response.raise_for_status()
+                content=response.text
+                cache.write_text(content)
+            count=0
+            for row in csv.DictReader(io.StringIO(content)):
+                norad=int(row['NORAD_CAT_ID'])
+                if norad in seen: continue
                 seen.add(norad)
-                combined.append((name[:200], norad, l1, l2, category))
-                taken += 1
-    finally:
-        client.close()
+                combined.append((row.get('OBJECT_NAME','Unknown')[:200],norad,json.dumps(row),'OMM',category))
+                count+=1
+                if count>=take: break
     return combined
 
 
@@ -437,7 +366,7 @@ def fetch_satellite_positions(db: Session, steps: int = 3, step_minutes: int = 1
 
     catalog = _fetch_group_tles(SATELLITE_GROUPS)
     if not catalog:
-        stored = db.execute(text("SELECT name, norad_id, tle_line1, tle_line2, COALESCE(category, 'other') FROM satellites")).all()
+        stored = db.execute(text("SELECT name, norad_id, tle_line1, tle_line2, COALESCE(category, 'other') FROM satellites s WHERE EXISTS (SELECT 1 FROM satellite_observations o WHERE o.satellite_id=s.id AND o.source='celestrak')")).all()
         catalog = [(r[0], r[1], r[2], r[3], r[4]) for r in stored if r[2] and r[3]]
         logger.info("Celestrak offline or empty; fell back to %d stored satellites", len(catalog))
     else:
@@ -469,7 +398,7 @@ def fetch_satellite_positions(db: Session, steps: int = 3, step_minutes: int = 1
             sat.tle_line1, sat.tle_line2 = l1, l2
 
         try:
-            Satrec.twoline2rv(l1, l2)  # validate before storing positions
+            __import__("app.services.orbits", fromlist=["satrec"]).satrec(l1, l2)
         except Exception as exc:
             logger.warning("Bad TLE for %s: %s", name, exc)
             continue
@@ -630,12 +559,12 @@ def fetch_live_events(db: Session) -> int:
                         event_date=datetime.fromtimestamp(
                             props.get("time", 0) / 1000, tz=timezone.utc
                         ),
-                        event_type="Conflict Incident",
-                        category="Geopolitical / Security Threat",
+                        event_type="Earthquake",
+                        category="Natural hazard",
                         severity="High" if mag >= 5.5 else "Medium" if mag >= 4 else "Low",
                         position=point_to_wkt(lon, lat),
                         region_id=region.id,
-                        description=f"Security alert (Lvl {mag:.1f}) — {props.get('place', 'unknown location')}",
+                        description=f"M{mag:.1f} earthquake — {props.get('place', 'unknown location')}",
                         source="usgs",
                     )
                 )
@@ -649,19 +578,14 @@ def fetch_live_events(db: Session) -> int:
 
 # -------------------------------------------------------------- entrypoint --
 def prune_old_observations(days: int | None = None) -> int:
-    """Delete observations older than the retention window."""
+    """Archive a bounded batch before pruning live observations."""
     from app.core.config import get_settings
 
     days = int(days or get_settings().RETENTION_DAYS)
     db = SessionLocal()
     try:
-        removed = 0
-        for table, col in (("flight_observations", "timestamp"), ("satellite_observations", "timestamp"),
-                           ("weather_observations", "timestamp")):
-            res = db.execute(text(
-                f"DELETE FROM {table} WHERE {col} < NOW() - make_interval(days => :d)"
-            ), {"d": days})
-            removed += res.rowcount or 0
+        from app.services.retention import archive_legacy
+        removed=archive_legacy(db,datetime.now(timezone.utc)-timedelta(days=days))
         db.commit()
         return removed
     finally:

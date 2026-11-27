@@ -103,7 +103,7 @@ def test_anomaly_engine_flags_satellite_and_route_deviation_spikes():
     assert spike_dev[0]["feature_name"] in ("flight_route_deviation", "airspace_conflict_evasion")
 
 
-def test_anomaly_engine_marks_storm_deviation_weather_explained():
+def test_anomaly_engine_preserves_severity_for_storm_coincidence():
     devs = [15.0] * len(HOURS)
     storm = [10.0] * len(HOURS)
     devs[-3], storm[-3] = 120.0, 80.0
@@ -111,20 +111,29 @@ def test_anomaly_engine_marks_storm_deviation_weather_explained():
     hit = [r for r in rows if r["observed_value"] in (120.0, 80.0)]
     assert hit
     assert any("weather" in r["feature_name"] or r["severity_label"] in ("low", "normal") for r in hit)
+    assert all(r['severity_label']=='high' for r in hit if r['composite_score']>=80)
 
 
-def test_anomaly_engine_detects_war_conflict_early_warning():
+def test_anomaly_engine_does_not_fit_its_cold_start_test_hours():
+    rs=series(aircraft=[None]*(len(HOURS)-3)+[50.0]*3,satellites=[None]*(len(HOURS)-3)+[10.0]*3)
+    assert anomaly_rows(rs)==[]
+
+
+def test_region_explanation_does_not_infer_conflict_or_known_routes():
+    from app.services.disruption import explain
+    result=explain('Test',{'flights':{'route_deviations':{}},'events':{},'weather':{'storm_now':5},'satellites':{}})
+    assert 'unavailable' in ' '.join(result)
+
+
+def test_compound_change_does_not_assert_conflict():
     # Coincident satellite surveillance surge + flight route avoidance in clear weather
     sats = [10.0] * len(HOURS); sats[-3] = 40.0
     devs = [15.0] * len(HOURS); devs[-3] = 310.0
     storm = [5.0] * len(HOURS)
     rows = anomaly_rows(series(satellites=sats, flight_deviations=devs, storm=storm))
-    war_hit = [r for r in rows if "war_conflict" in r["feature_name"]]
-    assert war_hit, f"Expected war_conflict_early_warning, got: {[r['feature_name'] for r in rows]}"
-    assert war_hit[0]["severity_label"] in ("high", "medium")
-    # Verified war & conflict risk is directly included in composite score
-    assert war_hit[0]["composite_score"] >= 60.0
-
+    assert rows
+    assert any('flight_route_deviation' in r['feature_name'] for r in rows)
+    assert all('war_conflict' not in r['feature_name'] for r in rows)
 
 def test_weekly_flight_deviation_metrics():
     a = flat(100.0)

@@ -13,6 +13,8 @@ dist/
 
 # Env & secrets
 .env
+.env.*
+!.env.example
 .ai/
 ai/
 .config/
@@ -24,3 +26,11 @@ backend/app/data/.cache/
 # OS
 .DS_Store
 Thumbs.db
+
+# Private scientific evidence, archives and database backups
+backups/
+artifacts/
+*.dump
+
+# Generated reports can contain personal details; publish application source only.
+/output/

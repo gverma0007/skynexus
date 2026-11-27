@@ -56,7 +56,7 @@ export default function Satellites({ selected }: { selected: number | null }) {
       <div className="pagehead">
         <div>
           <h1>Satellites</h1>
-          <p>{fmtNum(sats.data?.length)} spacecraft, positioned live from their orbital elements with SGP4.</p>
+          <p>{fmtNum(sats.data?.length)} spacecraft, with predicted positions propagated from orbital elements using SGP4.</p>
         </div>
         <button className="btn" onClick={exportCsv} disabled={!rows.length}>Export CSV</button>
       </div>

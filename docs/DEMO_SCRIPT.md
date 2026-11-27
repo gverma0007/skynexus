@@ -1,28 +1,29 @@
-# SkyNexus demo script (about 4 minutes)
+# SkyNexus academic demo (about six minutes)
 
-Run in demo mode for a predictable walkthrough: set `DATA_MODE=demo` in `.env`, then `docker compose up --build`.
+Run `docker compose up -d --build`, open http://localhost:5173 and select **Enter demo**. The current installation has all eight public historical datasets cached. For a new installation, use each case’s Download public data button or run the commands in [HISTORICAL_DATA.md](HISTORICAL_DATA.md).
 
-## 1. The question it answers (0:00–0:30)
-"SkyNexus watches 15 regions and answers one question: where is activity unusual right now, and why? It combines aircraft positions, satellite orbits, weather and earthquakes from free public feeds."
+## 1. The research question (0:00–0:40)
 
-## 2. Overview (0:30–1:30)
-- Read the headline: "2 regions need attention". Point out the ranked list on the left.
-- The globe is shaded by severity. Darker ink means more disruption, and red is reserved for Critical. Drag it and toggle the layers.
-- Click **Red Sea**. The score is 80, Critical, up from yesterday. The bars show the drivers: air traffic about 60% above its usual level for this hour, plus an M6.1 and an M5.8 earthquake.
-- The chart shows aircraft per hour against the grey usual range, with the dashed 6-hour projection.
+Can public observations help identify unusual regional activity, and do evaluated predictors provide useful warning before an independently annotated change? Show the source catalogue and distinguish native streams, provider polling, historical archives and synthetic cases.
 
-## 3. Weather is ruled out first (1:30–2:00)
-- Click **Eastern Mediterranean**. Traffic is down about 20%, but storm intensity is high, so the panel says "Bad weather may explain the drop in air traffic".
-- Click **Taiwan Strait**. Traffic is down about 40% in fair weather, the pattern an airspace restriction would leave. Say clearly that the system does not claim a cause.
+## 2. Replay a documented event (0:40–1:40)
 
-## 4. Evidence (2:00–3:00)
-- **Events, Anomaly log:** each flagged hour shows its z-score and Isolation Forest score.
-- **Satellites:** search "ISS" with Ctrl+K. Show the ground track and orbital elements. Positions are computed live with SGP4 and verified against Skyfield in the tests.
-- **Regions:** compare Red Sea and Taiwan Strait side by side, then export the CSV.
+Open Historical replay and select Suez 2021. Show the real daily vessel counts, source attribution and daily step size. Scrub through the March blockage and recovery. Reveal the event-window labels and explain that a documented event interval is a coarse association target, not independent measurement-level operational ground truth.
 
-## 5. Report (3:00–3:40)
-- From Red Sea, click **Compare last 24 h**. Walk through before and after for each measure and read the assessment.
-- Click **Print or save as PDF**. Point to the causation disclaimer.
+## 3. Inspect coverage and scientific meaning (1:40–2:30)
 
-## 6. Close (3:40–4:00)
-"It runs with one command, `docker compose up`. Switch to live mode and the same pipeline runs on real feeds every 10 minutes. The System page shows each source's health."
+Open Hurricane Ian or the smoke case. Inspect the units and a missing measurement. Missing sensor data stays unavailable. The smoke case uses one fixed NYC monitor selected by pre-event coverage. Weather and pollution observations do not prove airport closure or infrastructure damage. Tonga’s available series measures seismic context, not internet connectivity.
+
+## 4. Evaluate real labelled data (2:30–4:15)
+
+Select NYC taxi passenger demand. The measurements and anomaly windows come from the pinned public NAB archive. Open the evaluated result: training, calibration and test are separate and chronological. Compare seasonal Z-score, Isolation Forest and quality-aware fusion. Point out the difference between per-sample recall and detecting some part of an event window.
+
+Inspect numeric forecast MAE/RMSE against persistence and seasonal baselines. Then inspect the onset-warning probabilities, Brier score, warning precision, positive lead time and false-warning hours. A small Brier improvement can coexist with poor warning precision; read the actual result rather than presenting all detection as useful prediction. Source clocks and buffered annotation windows limit the interpretation of lead time.
+
+## 5. Explain refusal and quality controls (4:15–5:10)
+
+Show insufficient warning labels for a single-event case. FAA delay outcomes were released later, so the tool does not claim live advance-warning validity from them. The equipment case has a real clock reversal: duplicate timestamps are excluded instead of guessing between conflicting readings. Explain that the displayed native sample axis and source limitations remain inspectable.
+
+## 6. Reproduce the result (5:10–6:00)
+
+Download a historical evaluation ZIP. It contains processed observations and labels, evaluated outputs, a readable study report, checksums and method metadata. NAB exports also include its license notice. Separate synthetic tests remain available for controlled outages and compound scenarios. Finish with the globe modes and realtime/pause control, distinguishing incoming live observations from historical replay.

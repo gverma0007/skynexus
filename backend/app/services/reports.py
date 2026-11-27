@@ -29,16 +29,47 @@ def _avg(values: list[float | None]) -> float | None:
     return round(statistics.fmean(vals), 1) if vals else None
 
 
+def describe_patterns(metrics):
+    """Descriptive comparisons of stored complete hours; no causal/predictive claim."""
+    from datetime import datetime
+    start=datetime.fromisoformat(metrics['windows']['after_start'])
+    end=datetime.fromisoformat(metrics['windows']['after_end']).replace(minute=0,second=0,microsecond=0)
+    points=[p for p in metrics['historical_data']['points'] if start<=datetime.fromisoformat(p['time'])<end]
+    flags=[];run=longest=0;previous=None;reference=0;coincident=0
+    for p in points:
+        when=datetime.fromisoformat(p['time']);band=p.get('normal_range');value=p.get('aircraft')
+        if value is not None and band:
+            reference+=1
+        outside=value is not None and band and (value<band[0] or value>band[1])
+        if outside:
+            run=run+1 if previous is not None and when-previous==timedelta(hours=1) else 1
+            longest=max(longest,run)
+            coincident+=int(p.get('storm') is not None and p['storm']>=40)
+            flags.append({'time':p['time'],'direction':'below' if value<band[0] else 'above','aircraft':value,'reference_band':band,'storm':p.get('storm')})
+        else:run=0
+        previous=when
+    observed=sum(p.get('aircraft') is not None for p in points)
+    return {'method':'descriptive_reference_band_comparison','baseline_hours':metrics['historical_data']['baseline_hours'],
+            'complete_hours':len(points),'observed_hours':observed,'missing_hours':len(points)-observed,
+            'reference_band_hours':reference,'below_band_hours':sum(f['direction']=='below' for f in flags),
+            'above_band_hours':sum(f['direction']=='above' for f in flags),'longest_run_outside_band_hours':longest,
+            'weather_coincident_outside_band_hours':coincident,'flagged_hours':flags,
+            'limitations':['The reference band is a descriptive hour-of-day mean plus/minus one standard deviation, not a calibrated anomaly threshold.',
+                           'Reference data ends 24 hours before the assessment; it can overlap a longer comparison window. This is not heldout evaluation.',
+                           'Weather coincidence and repeated deviations do not establish a cause.']}
+
+
 def _sat_passes(db: Session, region_id: str, start, end) -> int:
     return db.execute(text(
         """
         SELECT COUNT(DISTINCT so.satellite_id)
         FROM satellite_observations so JOIN regions r ON r.id = :rid
         WHERE so.timestamp >= :a AND so.timestamp < :b
+          AND so.source = :source
           AND so.position && r.geom
           AND ST_Contains(r.geom, ST_Force2D(so.position))
         """
-    ), {"rid": region_id, "a": start, "b": end}).scalar() or 0
+    ), {"rid": region_id, "a": start, "b": end, "source": "demo_dataset" if __import__("app.core.config", fromlist=["get_settings"]).get_settings().DATA_MODE == "demo" else "celestrak"}).scalar() or 0
 
 
 def build_metrics(db: Session, region_id: str, hours: int) -> dict | None:
@@ -109,11 +140,11 @@ def build_metrics(db: Session, region_id: str, hours: int) -> dict | None:
             "deviation_score": dev_info.get("dev_score", 0.0) if dev_info else 0.0,
         },
         "events_metrics": {
-            "label": "Conflict & War Threats", "unit": "incidents",
+            "label": "Natural hazard events", "unit": "incidents",
             "before": len(ev_before), "after": len(ev_after),
             "delta_pct": _pct(len(ev_before), len(ev_after)),
-            "largest": (largest["description"] or "").replace(" earthquake — ", ", ").replace("earthquake", "incident").replace("Earthquake", "Incident") if largest else None,
-            "list": [{"description": (e["description"] or "").replace(" earthquake — ", ", ").replace("earthquake", "incident").replace("Earthquake", "Incident"), "magnitude": e["magnitude"],
+            "largest": (largest["description"] or "").replace(" earthquake — ", ", ") if largest else None,
+            "list": [{"description": (e["description"] or "").replace(" earthquake — ", ", "), "magnitude": e["magnitude"],
                       "event_date": e["event_date"].isoformat()}
                      for e in sorted(ev_after, key=lambda e: -e["magnitude"])[:5]],
         },
@@ -139,20 +170,38 @@ def build_metrics(db: Session, region_id: str, hours: int) -> dict | None:
             ],
         },
         "confidence_pct": confidence,
+        "data_coverage_pct": confidence,
+        "confidence_definition": "Legacy field measures observation coverage, not causal confidence",
+        "evidence_support": "unvalidated_association",
+        "limitations": ["Correlation does not establish causation", "Satellite positions are propagated predictions", "Unknown routes do not establish diversion"],
+        "method_version": "research-3.0",
+        "dataset_mode": __import__("app.core.config", fromlist=["get_settings"]).get_settings().DATA_MODE,
     }
 
 
-async def generate_report(db: Session, region_id: str, hours: int, persist: bool = True) -> dict | None:
+async def generate_report(db: Session, region_id: str, hours: int, persist: bool = True, owner_session: str | None = None) -> dict | None:
     metrics = build_metrics(db, region_id, hours)
     if metrics is None:
         return None
+    import hashlib, json
+    from datetime import datetime
+    from app.services.evidence import collect_evidence
+    from app.services.exposure import regional_exposures
+    after_start=datetime.fromisoformat(metrics['windows']['after_start'])
+    after_end=datetime.fromisoformat(metrics['windows']['after_end'])
+    metrics['source_evidence']=collect_evidence(db,region_id,after_start,after_end,metrics['dataset_mode'])
+    metrics['exposures']=regional_exposures(db,region_id,metrics['dataset_mode'],after_end)
+    metrics['alternative_explanations']=[{'explanation':'Environmental conditions','support':'Evaluate corridor/asset-specific observations; a region-centre reading alone is insufficient.'},{'explanation':'Feed coverage or collection change','support':'Review source freshness and missing measurements before interpreting a traffic drop.'},{'explanation':'Documented operational restrictions','support':'Requires an attributed restriction matching this place and time; proximity alone is insufficient.'}]
+    metrics['pattern_analysis']=describe_patterns(metrics)
+    metrics['dataset_hash']=hashlib.sha256(json.dumps(metrics,sort_keys=True,default=str).encode()).hexdigest()
+    metrics['provenance']={'analysis_window':metrics['windows'],'baseline_hours':metrics['historical_data']['baseline_hours'],'inputs':['aircraft observations','weather observations','typed natural hazard events','propagated satellite positions'],'baseline_target_days':30,'validated_forecast':False}
     text_out, source = await get_ai_explanation(metrics)
     metrics["overall_assessment"] = text_out
     metrics["ai_source"] = source
     if persist:
         w = metrics["windows"]
         row = WhatChangedReport(
-            region_id=metrics["region"]["id"], event_id=None,
+            region_id=metrics["region"]["id"], event_id=None, owner_session=owner_session,
             before_start=w["before_start"], before_end=w["before_end"],
             after_start=w["after_start"], after_end=w["after_end"],
             metrics_json=metrics, ai_explanation=text_out,

@@ -1,0 +1,111 @@
+[
+  {
+    "id": "suez-2021",
+    "title": "Suez Canal blockage",
+    "dataset_mode": "historical",
+    "status": "metadata_only",
+    "event_start": "2021-03-23T00:00:00Z",
+    "event_end": "2021-03-29T23:59:59Z",
+    "domains": [
+      "maritime",
+      "aviation"
+    ],
+    "region": "Red Sea",
+    "description": "Study vessel queuing and recovery. No linked trajectory dataset is bundled.",
+    "provenance_url": "https://resilientmaritimelogistics.unctad.org/guidebook/case-study-3-port-port-said-egypt",
+    "limitations": [
+      "Event metadata is not a labelled activity time series."
+    ]
+  },
+  {
+    "id": "ian-2022",
+    "title": "Hurricane Ian regional infrastructure disruption",
+    "dataset_mode": "historical",
+    "status": "metadata_only",
+    "event_start": "2022-09-28T00:00:00Z",
+    "event_end": "2022-10-05T23:59:59Z",
+    "domains": [
+      "environment",
+      "infrastructure",
+      "aviation"
+    ],
+    "region": "Florida",
+    "description": "Study weather, transport and connectivity. Historical operational records must be imported separately.",
+    "provenance_url": "https://www.nhc.noaa.gov/data/tcr/AL092022_Ian.pdf",
+    "limitations": [
+      "The source documents the hazard; it does not validate an inferred infrastructure dependency."
+    ]
+  },
+  {
+    "id": "canada-smoke-2023",
+    "title": "Canadian wildfire smoke over northeastern US",
+    "dataset_mode": "historical",
+    "status": "metadata_only",
+    "event_start": "2023-06-06T00:00:00Z",
+    "event_end": "2023-06-09T23:59:59Z",
+    "domains": [
+      "environment",
+      "aviation"
+    ],
+    "region": "Northeastern US",
+    "description": "Compare fire observations, wind and air-quality histories.",
+    "provenance_url": "https://earthobservatory.nasa.gov/images/151433/smoke-smothers-the-northeast",
+    "limitations": [
+      "No causal or forecast accuracy metrics are attached to this catalogue entry."
+    ]
+  },
+  {
+    "id": "tonga-2022",
+    "title": "Tonga eruption and connectivity disruption",
+    "dataset_mode": "historical",
+    "status": "metadata_only",
+    "event_start": "2022-01-15T00:00:00Z",
+    "event_end": "2022-01-22T23:59:59Z",
+    "domains": [
+      "environment",
+      "infrastructure"
+    ],
+    "region": "Pacific",
+    "description": "Compare event timing and connectivity loss with delayed source availability.",
+    "provenance_url": "https://www.weather.gov/itic-car/15jan2022_hunga-tonga-hunga-haapai_volcanic_eruption",
+    "limitations": [
+      "No operational time series or independently reviewed outage labels are bundled."
+    ]
+  },
+  {
+    "id": "pakistan-floods-2022",
+    "title": "Pakistan floods",
+    "dataset_mode": "historical",
+    "status": "metadata_only",
+    "event_start": "2022-08-20T00:00:00Z",
+    "event_end": "2022-09-05T23:59:59Z",
+    "domains": [
+      "environment",
+      "transit"
+    ],
+    "region": "Pakistan",
+    "description": "Study river forecasts, flood footprints and transport exposure.",
+    "provenance_url": "https://earthobservatory.nasa.gov/images/150279/devastating-floods-in-pakistan",
+    "limitations": [
+      "A satellite flood footprint is not evidence that every intersecting asset failed."
+    ]
+  },
+  {
+    "id": "faa-notam-2023",
+    "title": "FAA NOTAM outage and ground stop",
+    "dataset_mode": "historical",
+    "status": "metadata_only",
+    "event_start": "2023-01-11T00:00:00Z",
+    "event_end": "2023-01-12T00:00:00Z",
+    "domains": [
+      "aviation",
+      "infrastructure"
+    ],
+    "region": "United States",
+    "description": "Compare operational traffic before, during and after the documented ground stop.",
+    "provenance_url": "https://www.faa.gov/newsroom/faa-notam-statement",
+    "limitations": [
+      "Actual traffic and timing labels must be supplied before evaluation."
+    ]
+  }
+]

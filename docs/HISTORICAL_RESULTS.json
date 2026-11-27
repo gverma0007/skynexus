@@ -1,0 +1,1892 @@
+{
+  "generated_at": "2026-11-26T23:54:45.484846+00:00",
+  "method_version": "historical-chronological-v3",
+  "cases": [
+    {
+      "case_id": "suez-2021",
+      "title": "Suez Canal blockage",
+      "dataset_hash": "3219287fc768813b90bcd184cac8eba78e70118e25154af59c3135b88c84d8f0",
+      "cadence_hours": 24,
+      "samples": 105,
+      "label_kind": "event_window_proxy",
+      "label_definition": "Overlap with the documented event interval. Event-window association only.",
+      "channels": [
+        {
+          "coverage_pct": 100.0,
+          "domain": "maritime",
+          "id": "transits",
+          "label": "Suez vessel transits",
+          "provenance_url": "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query?where=portid%3D%27chokepoint1%27+AND+year%3D2021&outFields=date%2Cportid%2Cportname%2Cn_total%2Ccapacity&orderByFields=date+ASC&returnGeometry=false&resultRecordCount=10000&f=json",
+          "unit": "vessels/day"
+        },
+        {
+          "coverage_pct": 100.0,
+          "domain": "maritime",
+          "id": "capacity",
+          "label": "Estimated transit capacity",
+          "provenance_url": "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query?where=portid%3D%27chokepoint1%27+AND+year%3D2021&outFields=date%2Cportid%2Cportname%2Cn_total%2Ccapacity&orderByFields=date+ASC&returnGeometry=false&resultRecordCount=10000&f=json",
+          "unit": "provider capacity units/day"
+        }
+      ],
+      "split": {
+        "calibration": 17,
+        "test": 24,
+        "training": 64
+      },
+      "detection": {
+        "comparisons": [
+          {
+            "event_recall": 1.0,
+            "f1": 0.5555555555555556,
+            "false_alerts": 6,
+            "false_negatives": 2,
+            "false_positives": 6,
+            "mean_detection_delay_hours": 24.0,
+            "method": "seasonal_z_score",
+            "precision": 0.45454545454545453,
+            "recall": 0.7142857142857143,
+            "samples": 24,
+            "true_positives": 5
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.56,
+            "false_alerts": 11,
+            "false_negatives": 0,
+            "false_positives": 11,
+            "mean_detection_delay_hours": 0.0,
+            "method": "isolation_forest",
+            "precision": 0.3888888888888889,
+            "recall": 1.0,
+            "samples": 24,
+            "true_positives": 7
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.5714285714285714,
+            "false_alerts": 8,
+            "false_negatives": 1,
+            "false_positives": 8,
+            "mean_detection_delay_hours": 24.0,
+            "method": "quality_aware_fusion",
+            "precision": 0.42857142857142855,
+            "recall": 0.8571428571428571,
+            "samples": 24,
+            "true_positives": 6
+          }
+        ],
+        "label_definition": "Overlap with the documented event interval. Event-window association only.",
+        "label_kind": "event_window_proxy",
+        "missing_test_samples": 0,
+        "status": "heldout_evaluated",
+        "test_event_windows": 1
+      },
+      "forecast": {
+        "by_horizon": {
+          "24.0": {
+            "persistence": {
+              "mae": 12.291666666666666,
+              "rmse": 16.68956759975125,
+              "samples": 24
+            },
+            "quantile_gradient_boosting": {
+              "mae": 21.311906165955318,
+              "rmse": 26.335236612318656,
+              "samples": 24
+            },
+            "seasonal": {
+              "mae": 33.458333333333336,
+              "rmse": 40.70063472068546,
+              "samples": 24
+            }
+          }
+        },
+        "candidate_origins": 24,
+        "forecast_metrics": {
+          "persistence": {
+            "mae": 12.291666666666666,
+            "rmse": 16.68956759975125,
+            "samples": 24
+          },
+          "quantile_gradient_boosting": {
+            "mae": 21.311906165955318,
+            "rmse": 26.335236612318656,
+            "samples": 24
+          },
+          "seasonal": {
+            "mae": 33.458333333333336,
+            "rmse": 40.70063472068546,
+            "samples": 24
+          }
+        },
+        "horizon_hours": 24.0,
+        "interval_nominal_coverage": 0.8,
+        "interval_observed_coverage": 0.20833333333333334,
+        "origins_evaluated": 24,
+        "status": "heldout_evaluated",
+        "target": "Suez vessel transits",
+        "unit": "vessels/day"
+      },
+      "advance_warning": {
+        "horizon_hours": 24.0,
+        "message": "Training and calibration must each contain normal and pre-onset examples. A single heldout incident cannot train a validated warning classifier.",
+        "purge_samples_per_boundary": 1,
+        "status": "insufficient_labels",
+        "target": "Annotated anomaly-window onset in the next 24.0 hours, conditional on being outside a labelled window."
+      },
+      "software_versions": {
+        "numpy": "2.4.6",
+        "pandas": "3.1.1",
+        "python": "3.11.18",
+        "scikit-learn": "1.9.1"
+      },
+      "parameters": {
+        "forecast_max_depth": 2,
+        "forecast_quantiles": [
+          0.1,
+          0.5,
+          0.9
+        ],
+        "forecast_trees": 35,
+        "isolation_calibration_quantile": 0.99,
+        "isolation_forest_trees": 80,
+        "normalizer_medians": [
+          54.0,
+          2464397.0
+        ],
+        "normalizer_scales": [
+          7.732275598910065,
+          461844.2839898082
+        ],
+        "quantile_crossing_correction": "interval encloses all three predicted quantiles",
+        "seasonal_period_samples": 7,
+        "seed": 42,
+        "warning_horizon_hours": 6,
+        "warning_threshold_selection": "maximum calibration F1 over 201 probability quantiles",
+        "z_threshold": 3
+      },
+      "provenance": [
+        {
+          "archive_key": "historical/raw/70c5ede54e7953d20c751bcfeed07df2f62948a1d90b993a4262d775f0430c56.bin",
+          "name": "IMF PortWatch Suez daily transit calls",
+          "retrieved_at": "2026-11-26T23:26:28.937925+00:00",
+          "sha256": "139e58f4d84a52e00220dd9f6d21628a4ed64c1e7be77fcdcab722fd3787a0f8",
+          "size_bytes": 43133,
+          "url": "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query?where=portid%3D%27chokepoint1%27+AND+year%3D2021&outFields=date%2Cportid%2Cportname%2Cn_total%2Ccapacity&orderByFields=date+ASC&returnGeometry=false&resultRecordCount=10000&f=json"
+        },
+        {
+          "name": "Case documentation / label provenance",
+          "url": "https://resilientmaritimelogistics.unctad.org/guidebook/case-study-3-port-port-said-egypt"
+        }
+      ],
+      "limitations": [
+        "Documented event-window labels are a coarse association target, not independent hour-level operational anomaly ground truth.",
+        "A single incident with normal-only pre-event training cannot validate a fitted advance-warning classifier.",
+        "Archives may include later revisions. Observation time is not proof of original publication availability; retrospective results do not establish live prediction accuracy.",
+        "Models and normalization fit training observations only; IF thresholds and warning calibration use the separate calibration interval.",
+        "Anomaly normal-training selection uses the supplied training labels. Missing primary measurements are excluded from scoring, not treated as zero.",
+        "Numeric forecasts use at most 96 uniformly spaced heldout origins and no future actuals in recursive paths. These are retrospective archive tests.",
+        "Warning features use strictly earlier samples. Targets crossing split boundaries are purged; ongoing labelled windows are excluded from onset-warning metrics.",
+        "False-alert counts are sample counts at the native cadence, not independent incident counts. No aggregate cross-case accuracy is inferred.",
+        "These are retrospective point estimates on few events, not statistical proof of generalization or validated live advance-warning capability."
+      ]
+    },
+    {
+      "case_id": "ian-2022",
+      "title": "Hurricane Ian regional infrastructure disruption",
+      "dataset_hash": "402ea4fb65032442215b5fe189f2573d51b4e591cf6b66970b1fc3e321158b50",
+      "cadence_hours": 1,
+      "samples": 2568,
+      "label_kind": "event_window_proxy",
+      "label_definition": "Overlap with the documented event interval. Event-window association only.",
+      "channels": [
+        {
+          "coverage_pct": 93.42,
+          "domain": "environment",
+          "id": "rain",
+          "label": "Reported 1-hour precipitation",
+          "provenance_url": "https://noaa-global-hourly-pds.s3.amazonaws.com/2022/72210612835.csv",
+          "unit": "mm"
+        },
+        {
+          "coverage_pct": 88.98,
+          "domain": "environment",
+          "id": "wind",
+          "label": "Station wind speed",
+          "provenance_url": "https://noaa-global-hourly-pds.s3.amazonaws.com/2022/72210612835.csv",
+          "unit": "m/s"
+        },
+        {
+          "coverage_pct": 92.64,
+          "domain": "environment",
+          "id": "pressure",
+          "label": "Station sea-level pressure",
+          "provenance_url": "https://noaa-global-hourly-pds.s3.amazonaws.com/2022/72210612835.csv",
+          "unit": "hPa"
+        }
+      ],
+      "split": {
+        "calibration": 428,
+        "test": 432,
+        "training": 1708
+      },
+      "detection": {
+        "comparisons": [
+          {
+            "event_recall": 1.0,
+            "f1": 0.2777777777777778,
+            "false_alerts": 0,
+            "false_negatives": 26,
+            "false_positives": 0,
+            "mean_detection_delay_hours": 1.0,
+            "method": "seasonal_z_score",
+            "precision": 1.0,
+            "recall": 0.16129032258064516,
+            "samples": 265,
+            "true_positives": 5
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.5238095238095238,
+            "false_alerts": 0,
+            "false_negatives": 20,
+            "false_positives": 0,
+            "mean_detection_delay_hours": 0.0,
+            "method": "isolation_forest",
+            "precision": 1.0,
+            "recall": 0.3548387096774194,
+            "samples": 265,
+            "true_positives": 11
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.5454545454545454,
+            "false_alerts": 1,
+            "false_negatives": 19,
+            "false_positives": 1,
+            "mean_detection_delay_hours": 1.0,
+            "method": "quality_aware_fusion",
+            "precision": 0.9230769230769231,
+            "recall": 0.3870967741935484,
+            "samples": 265,
+            "true_positives": 12
+          }
+        ],
+        "label_definition": "Overlap with the documented event interval. Event-window association only.",
+        "label_kind": "event_window_proxy",
+        "missing_test_samples": 167,
+        "status": "heldout_evaluated",
+        "test_event_windows": 1
+      },
+      "forecast": {
+        "by_horizon": {
+          "1.0": {
+            "persistence": {
+              "mae": 0.5487785714285713,
+              "rmse": 2.099856384459933,
+              "samples": 56
+            },
+            "quantile_gradient_boosting": {
+              "mae": 0.5256535714285715,
+              "rmse": 2.3351169203673106,
+              "samples": 56
+            },
+            "seasonal": {
+              "mae": 0.6430642857142858,
+              "rmse": 2.4685008564337756,
+              "samples": 56
+            }
+          },
+          "3.0": {
+            "persistence": {
+              "mae": 0.36034999999999995,
+              "rmse": 1.3509486699829019,
+              "samples": 56
+            },
+            "quantile_gradient_boosting": {
+              "mae": 0.4027,
+              "rmse": 1.6287049758057122,
+              "samples": 56
+            },
+            "seasonal": {
+              "mae": 0.44287857142857145,
+              "rmse": 1.6380712433268234,
+              "samples": 56
+            }
+          },
+          "6.0": {
+            "persistence": {
+              "mae": 0.4604629629629629,
+              "rmse": 2.085568245684472,
+              "samples": 54
+            },
+            "quantile_gradient_boosting": {
+              "mae": 0.5324074074074074,
+              "rmse": 2.4524398282345503,
+              "samples": 54
+            },
+            "seasonal": {
+              "mae": 0.6430555555555556,
+              "rmse": 2.5795833894183304,
+              "samples": 54
+            }
+          }
+        },
+        "candidate_origins": 96,
+        "forecast_metrics": {
+          "persistence": {
+            "mae": 0.4604629629629629,
+            "rmse": 2.085568245684472,
+            "samples": 54
+          },
+          "quantile_gradient_boosting": {
+            "mae": 0.5324074074074074,
+            "rmse": 2.4524398282345503,
+            "samples": 54
+          },
+          "seasonal": {
+            "mae": 0.6430555555555556,
+            "rmse": 2.5795833894183304,
+            "samples": 54
+          }
+        },
+        "horizon_hours": 6.0,
+        "interval_nominal_coverage": 0.8,
+        "interval_observed_coverage": 0.8888888888888888,
+        "origins_evaluated": 59,
+        "status": "heldout_evaluated",
+        "target": "Reported 1-hour precipitation",
+        "unit": "mm"
+      },
+      "advance_warning": {
+        "horizon_hours": 6.0,
+        "message": "Training and calibration must each contain normal and pre-onset examples. A single heldout incident cannot train a validated warning classifier.",
+        "purge_samples_per_boundary": 6,
+        "status": "insufficient_labels",
+        "target": "Annotated anomaly-window onset in the next 6.0 hours, conditional on being outside a labelled window."
+      },
+      "software_versions": {
+        "numpy": "2.4.6",
+        "pandas": "3.1.1",
+        "python": "3.11.18",
+        "scikit-learn": "1.9.1"
+      },
+      "parameters": {
+        "forecast_max_depth": 2,
+        "forecast_quantiles": [
+          0.1,
+          0.5,
+          0.9
+        ],
+        "forecast_trees": 35,
+        "isolation_calibration_quantile": 0.99,
+        "isolation_forest_trees": 80,
+        "normalizer_medians": [
+          0.0,
+          2.1,
+          1017.2
+        ],
+        "normalizer_scales": [
+          2.082317151485849,
+          1.664235518797404,
+          50.86000000000001
+        ],
+        "quantile_crossing_correction": "interval encloses all three predicted quantiles",
+        "seasonal_period_samples": 24,
+        "seed": 42,
+        "warning_horizon_hours": 6,
+        "warning_threshold_selection": "maximum calibration F1 over 201 probability quantiles",
+        "z_threshold": 3
+      },
+      "provenance": [
+        {
+          "archive_key": "historical/raw/ff9b9eaa1e4a5e5a0420cc2687a35cb4f74a5da0f2bdbf442e63a6cd8c31fa45.bin",
+          "name": "NOAA ISD station observations",
+          "retrieved_at": "2026-11-26T23:26:42.296920+00:00",
+          "sha256": "74942a619a430f623bcd0d030065a570aaeb0c76d900a32c7f603fd0471e3c84",
+          "size_bytes": 6553314,
+          "url": "https://noaa-global-hourly-pds.s3.amazonaws.com/2022/72210612835.csv"
+        },
+        {
+          "name": "Case documentation / label provenance",
+          "url": "https://www.nhc.noaa.gov/data/tcr/AL092022_Ian.pdf"
+        }
+      ],
+      "limitations": [
+        "Single NOAA station: FORT MYERS PAGE FIELD AIRPORT, FL US (72210612835). It does not measure regional infrastructure damage or flood extent.",
+        "Only accepted ISD quality flags are used; missing readings remain null. Precipitation is a reported accumulation, not an inferred flood boundary.",
+        "Documented event-window labels are a coarse association target, not independent hour-level operational anomaly ground truth.",
+        "A single incident with normal-only pre-event training cannot validate a fitted advance-warning classifier.",
+        "Archives may include later revisions. Observation time is not proof of original publication availability; retrospective results do not establish live prediction accuracy.",
+        "Models and normalization fit training observations only; IF thresholds and warning calibration use the separate calibration interval.",
+        "Anomaly normal-training selection uses the supplied training labels. Missing primary measurements are excluded from scoring, not treated as zero.",
+        "Numeric forecasts use at most 96 uniformly spaced heldout origins and no future actuals in recursive paths. These are retrospective archive tests.",
+        "Warning features use strictly earlier samples. Targets crossing split boundaries are purged; ongoing labelled windows are excluded from onset-warning metrics.",
+        "False-alert counts are sample counts at the native cadence, not independent incident counts. No aggregate cross-case accuracy is inferred.",
+        "These are retrospective point estimates on few events, not statistical proof of generalization or validated live advance-warning capability."
+      ]
+    },
+    {
+      "case_id": "canada-smoke-2023",
+      "title": "Canadian wildfire smoke over northeastern US",
+      "dataset_hash": "53fb79e4124743fe0f73652e4b7c6f0aef0897dfef8bae2a5a5c9205f37b650e",
+      "cadence_hours": 1,
+      "samples": 1920,
+      "label_kind": "event_window_proxy",
+      "label_definition": "Overlap with the documented event interval. Event-window association only.",
+      "channels": [
+        {
+          "coverage_pct": 93.85,
+          "domain": "environment",
+          "entity": "AQS 36-047-0118 / POC 3",
+          "id": "pm25",
+          "label": "NYC fixed-monitor PM2.5",
+          "provenance_url": "https://aqs.epa.gov/aqsweb/airdata/hourly_88502_2023.zip",
+          "selection": "Highest pre-June coverage; fixed monitor and POC throughout",
+          "unit": "micrograms/m\u00b3"
+        }
+      ],
+      "split": {
+        "calibration": 317,
+        "test": 336,
+        "training": 1267
+      },
+      "detection": {
+        "comparisons": [
+          {
+            "event_recall": 1.0,
+            "f1": 0.6846846846846847,
+            "false_alerts": 50,
+            "false_negatives": 20,
+            "false_positives": 50,
+            "mean_detection_delay_hours": 1.0,
+            "method": "seasonal_z_score",
+            "precision": 0.6031746031746031,
+            "recall": 0.7916666666666666,
+            "samples": 221,
+            "true_positives": 76
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.7389162561576355,
+            "false_alerts": 32,
+            "false_negatives": 21,
+            "false_positives": 32,
+            "mean_detection_delay_hours": 1.0,
+            "method": "isolation_forest",
+            "precision": 0.7009345794392523,
+            "recall": 0.78125,
+            "samples": 221,
+            "true_positives": 75
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.6846846846846847,
+            "false_alerts": 50,
+            "false_negatives": 20,
+            "false_positives": 50,
+            "mean_detection_delay_hours": 1.0,
+            "method": "quality_aware_fusion",
+            "precision": 0.6031746031746031,
+            "recall": 0.7916666666666666,
+            "samples": 221,
+            "true_positives": 76
+          }
+        ],
+        "label_definition": "Overlap with the documented event interval. Event-window association only.",
+        "label_kind": "event_window_proxy",
+        "missing_test_samples": 115,
+        "status": "heldout_evaluated",
+        "test_event_windows": 1
+      },
+      "forecast": {
+        "by_horizon": {
+          "1.0": {
+            "persistence": {
+              "mae": 5.069841269841269,
+              "rmse": 16.26046915506613,
+              "samples": 63
+            },
+            "quantile_gradient_boosting": {
+              "mae": 34.23600124179996,
+              "rmse": 69.35727720293693,
+              "samples": 63
+            },
+            "seasonal": {
+              "mae": 45.72698412698412,
+              "rmse": 77.24587213505173,
+              "samples": 63
+            }
+          },
+          "3.0": {
+            "persistence": {
+              "mae": 13.426984126984129,
+              "rmse": 30.21835088416855,
+              "samples": 63
+            },
+            "quantile_gradient_boosting": {
+              "mae": 37.69404729112329,
+              "rmse": 73.5400409950331,
+              "samples": 63
+            },
+            "seasonal": {
+              "mae": 44.31428571428572,
+              "rmse": 71.37759863781905,
+              "samples": 63
+            }
+          },
+          "6.0": {
+            "persistence": {
+              "mae": 20.822580645161295,
+              "rmse": 46.00365693738817,
+              "samples": 62
+            },
+            "quantile_gradient_boosting": {
+              "mae": 39.188301750329,
+              "rmse": 72.90945831609855,
+              "samples": 62
+            },
+            "seasonal": {
+              "mae": 47.677419354838705,
+              "rmse": 80.43100028255034,
+              "samples": 62
+            }
+          }
+        },
+        "candidate_origins": 96,
+        "forecast_metrics": {
+          "persistence": {
+            "mae": 20.822580645161295,
+            "rmse": 46.00365693738817,
+            "samples": 62
+          },
+          "quantile_gradient_boosting": {
+            "mae": 39.188301750329,
+            "rmse": 72.90945831609855,
+            "samples": 62
+          },
+          "seasonal": {
+            "mae": 47.677419354838705,
+            "rmse": 80.43100028255034,
+            "samples": 62
+          }
+        },
+        "horizon_hours": 6.0,
+        "interval_nominal_coverage": 0.8,
+        "interval_observed_coverage": 0.4032258064516129,
+        "origins_evaluated": 64,
+        "status": "heldout_evaluated",
+        "target": "NYC fixed-monitor PM2.5",
+        "unit": "micrograms/m\u00b3"
+      },
+      "advance_warning": {
+        "horizon_hours": 6.0,
+        "message": "Training and calibration must each contain normal and pre-onset examples. A single heldout incident cannot train a validated warning classifier.",
+        "purge_samples_per_boundary": 6,
+        "status": "insufficient_labels",
+        "target": "Annotated anomaly-window onset in the next 6.0 hours, conditional on being outside a labelled window."
+      },
+      "software_versions": {
+        "numpy": "2.4.6",
+        "pandas": "3.1.1",
+        "python": "3.11.18",
+        "scikit-learn": "1.9.1"
+      },
+      "parameters": {
+        "forecast_max_depth": 2,
+        "forecast_quantiles": [
+          0.1,
+          0.5,
+          0.9
+        ],
+        "forecast_trees": 35,
+        "isolation_calibration_quantile": 0.99,
+        "isolation_forest_trees": 80,
+        "normalizer_medians": [
+          7.7
+        ],
+        "normalizer_scales": [
+          4.539085006855912
+        ],
+        "quantile_crossing_correction": "interval encloses all three predicted quantiles",
+        "seasonal_period_samples": 24,
+        "seed": 42,
+        "warning_horizon_hours": 6,
+        "warning_threshold_selection": "maximum calibration F1 over 201 probability quantiles",
+        "z_threshold": 3
+      },
+      "provenance": [
+        {
+          "archive_key": "historical/raw/74dcdc27122912d57578aba8466d03c9d92f31578fe3f381fac85c6f31c5c55b.bin",
+          "name": "EPA AQS hourly PM2.5 parameter 88502 (non-reference methods)",
+          "retrieved_at": "2026-11-26T23:36:12.409326+00:00",
+          "sha256": "ef8a409e2fc23937830c0828990173a83979912112121bfda04084c6c2de9cf1",
+          "size_bytes": 15188269,
+          "url": "https://aqs.epa.gov/aqsweb/airdata/hourly_88502_2023.zip"
+        },
+        {
+          "name": "Case documentation / label provenance",
+          "url": "https://earthobservatory.nasa.gov/images/151433/smoke-smothers-the-northeast"
+        }
+      ],
+      "limitations": [
+        "EPA parameter 88502 uses non-reference/equivalent PM2.5 methods; it is research data, not a regulatory compliance assessment.",
+        "One fixed NYC monitor/POC is selected using only pre-June coverage. It does not represent all northeastern US locations. Finite nonnegative measurements are retained; raw qualifier flags remain in the source archive.",
+        "Documented event-window labels are a coarse association target, not independent hour-level operational anomaly ground truth.",
+        "A single incident with normal-only pre-event training cannot validate a fitted advance-warning classifier.",
+        "Archives may include later revisions. Observation time is not proof of original publication availability; retrospective results do not establish live prediction accuracy.",
+        "Models and normalization fit training observations only; IF thresholds and warning calibration use the separate calibration interval.",
+        "Anomaly normal-training selection uses the supplied training labels. Missing primary measurements are excluded from scoring, not treated as zero.",
+        "Numeric forecasts use at most 96 uniformly spaced heldout origins and no future actuals in recursive paths. These are retrospective archive tests.",
+        "Warning features use strictly earlier samples. Targets crossing split boundaries are purged; ongoing labelled windows are excluded from onset-warning metrics.",
+        "False-alert counts are sample counts at the native cadence, not independent incident counts. No aggregate cross-case accuracy is inferred.",
+        "These are retrospective point estimates on few events, not statistical proof of generalization or validated live advance-warning capability."
+      ]
+    },
+    {
+      "case_id": "tonga-2022",
+      "title": "Tonga eruption and connectivity disruption",
+      "dataset_hash": "26269319c16ff6270a564a9d59b49234ac67a9a9055dc129cb8cdcf25281e618",
+      "cadence_hours": 6,
+      "samples": 312,
+      "label_kind": "event_window_proxy",
+      "label_definition": "Overlap with the documented event interval. Event-window association only.",
+      "channels": [
+        {
+          "coverage_pct": 100.0,
+          "domain": "environment",
+          "id": "earthquakes",
+          "label": "Regional catalogued earthquakes M\u22654",
+          "provenance_url": "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=2021-11-15&endtime=2022-02-01&minlatitude=-23&maxlatitude=-18&minlongitude=-178&maxlongitude=-172&minmagnitude=4&limit=20000&orderby=time-asc",
+          "unit": "events/6h"
+        },
+        {
+          "coverage_pct": 100.0,
+          "domain": "environment",
+          "id": "volcanic_events",
+          "label": "Catalogued volcanic events M\u22654",
+          "provenance_url": "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=2021-11-15&endtime=2022-02-01&minlatitude=-23&maxlatitude=-18&minlongitude=-178&maxlongitude=-172&minmagnitude=4&limit=20000&orderby=time-asc",
+          "unit": "events/6h"
+        }
+      ],
+      "split": {
+        "calibration": 49,
+        "test": 68,
+        "training": 195
+      },
+      "detection": {
+        "comparisons": [
+          {
+            "event_recall": 1.0,
+            "f1": 0.6229508196721312,
+            "false_alerts": 10,
+            "false_negatives": 13,
+            "false_positives": 10,
+            "mean_detection_delay_hours": 0.0,
+            "method": "seasonal_z_score",
+            "precision": 0.6551724137931034,
+            "recall": 0.59375,
+            "samples": 68,
+            "true_positives": 19
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.6229508196721312,
+            "false_alerts": 10,
+            "false_negatives": 13,
+            "false_positives": 10,
+            "mean_detection_delay_hours": 0.0,
+            "method": "isolation_forest",
+            "precision": 0.6551724137931034,
+            "recall": 0.59375,
+            "samples": 68,
+            "true_positives": 19
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.6229508196721312,
+            "false_alerts": 10,
+            "false_negatives": 13,
+            "false_positives": 10,
+            "mean_detection_delay_hours": 0.0,
+            "method": "quality_aware_fusion",
+            "precision": 0.6551724137931034,
+            "recall": 0.59375,
+            "samples": 68,
+            "true_positives": 19
+          }
+        ],
+        "label_definition": "Overlap with the documented event interval. Event-window association only.",
+        "label_kind": "event_window_proxy",
+        "missing_test_samples": 0,
+        "status": "heldout_evaluated",
+        "test_event_windows": 1
+      },
+      "forecast": {
+        "by_horizon": {
+          "6.0": {
+            "persistence": {
+              "mae": 1.1911764705882353,
+              "rmse": 1.5764815627361644,
+              "samples": 68
+            },
+            "quantile_gradient_boosting": {
+              "mae": 1.6029411764705883,
+              "rmse": 2.25244964688774,
+              "samples": 68
+            },
+            "seasonal": {
+              "mae": 1.3235294117647058,
+              "rmse": 1.7904977947322853,
+              "samples": 68
+            }
+          }
+        },
+        "candidate_origins": 68,
+        "forecast_metrics": {
+          "persistence": {
+            "mae": 1.1911764705882353,
+            "rmse": 1.5764815627361644,
+            "samples": 68
+          },
+          "quantile_gradient_boosting": {
+            "mae": 1.6029411764705883,
+            "rmse": 2.25244964688774,
+            "samples": 68
+          },
+          "seasonal": {
+            "mae": 1.3235294117647058,
+            "rmse": 1.7904977947322853,
+            "samples": 68
+          }
+        },
+        "horizon_hours": 6.0,
+        "interval_nominal_coverage": 0.8,
+        "interval_observed_coverage": 0.5735294117647058,
+        "origins_evaluated": 68,
+        "status": "heldout_evaluated",
+        "target": "Regional catalogued earthquakes M\u22654",
+        "unit": "events/6h"
+      },
+      "advance_warning": {
+        "horizon_hours": 6.0,
+        "message": "Training and calibration must each contain normal and pre-onset examples. A single heldout incident cannot train a validated warning classifier.",
+        "purge_samples_per_boundary": 1,
+        "status": "insufficient_labels",
+        "target": "Annotated anomaly-window onset in the next 6.0 hours, conditional on being outside a labelled window."
+      },
+      "software_versions": {
+        "numpy": "2.4.6",
+        "pandas": "3.1.1",
+        "python": "3.11.18",
+        "scikit-learn": "1.9.1"
+      },
+      "parameters": {
+        "forecast_max_depth": 2,
+        "forecast_quantiles": [
+          0.1,
+          0.5,
+          0.9
+        ],
+        "forecast_trees": 35,
+        "isolation_calibration_quantile": 0.99,
+        "isolation_forest_trees": 80,
+        "normalizer_medians": [
+          0.0,
+          0.0
+        ],
+        "normalizer_scales": [
+          0.49999342533481456,
+          1e-06
+        ],
+        "quantile_crossing_correction": "interval encloses all three predicted quantiles",
+        "seasonal_period_samples": 4,
+        "seed": 42,
+        "warning_horizon_hours": 6,
+        "warning_threshold_selection": "maximum calibration F1 over 201 probability quantiles",
+        "z_threshold": 3
+      },
+      "provenance": [
+        {
+          "archive_key": "historical/raw/3c205e96911ca5ff404a4ec7710e5c491969999f4fb6479400b98afdda3a6ef8.bin",
+          "name": "USGS reviewed regional seismic event catalogue",
+          "retrieved_at": "2026-11-26T23:31:01.419533+00:00",
+          "sha256": "efb9afcaacac99b2065c17e9e419baa5be1d3f22b1d84ed9209ff5f888e5e1ea",
+          "size_bytes": 128927,
+          "url": "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=2021-11-15&endtime=2022-02-01&minlatitude=-23&maxlatitude=-18&minlongitude=-178&maxlongitude=-172&minmagnitude=4&limit=20000&orderby=time-asc"
+        },
+        {
+          "name": "Case documentation / label provenance",
+          "url": "https://www.weather.gov/itic-car/15jan2022_hunga-tonga-hunga-haapai_volcanic_eruption"
+        }
+      ],
+      "limitations": [
+        "Regional seismic catalogue context only; connectivity and cable-outage telemetry are not supplied. Regional earthquakes are not all caused by the eruption.",
+        "A zero means no matching catalogued event in this successful query, not proof that no seismic activity occurred.",
+        "Documented event-window labels are a coarse association target, not independent hour-level operational anomaly ground truth.",
+        "A single incident with normal-only pre-event training cannot validate a fitted advance-warning classifier.",
+        "Archives may include later revisions. Observation time is not proof of original publication availability; retrospective results do not establish live prediction accuracy.",
+        "Models and normalization fit training observations only; IF thresholds and warning calibration use the separate calibration interval.",
+        "Anomaly normal-training selection uses the supplied training labels. Missing primary measurements are excluded from scoring, not treated as zero.",
+        "Numeric forecasts use at most 96 uniformly spaced heldout origins and no future actuals in recursive paths. These are retrospective archive tests.",
+        "Warning features use strictly earlier samples. Targets crossing split boundaries are purged; ongoing labelled windows are excluded from onset-warning metrics.",
+        "False-alert counts are sample counts at the native cadence, not independent incident counts. No aggregate cross-case accuracy is inferred.",
+        "These are retrospective point estimates on few events, not statistical proof of generalization or validated live advance-warning capability."
+      ]
+    },
+    {
+      "case_id": "pakistan-floods-2022",
+      "title": "Pakistan floods",
+      "dataset_hash": "ea3b9b1aea160ab5f89e3103a9845d7c330e6d204d8f5fe2461d8a09c5d6bdf9",
+      "cadence_hours": 3,
+      "samples": 856,
+      "label_kind": "event_window_proxy",
+      "label_definition": "Overlap with the documented event interval. Event-window association only.",
+      "channels": [
+        {
+          "coverage_pct": 53.15,
+          "domain": "environment",
+          "id": "rain",
+          "label": "Reported 3-hour precipitation",
+          "provenance_url": "https://noaa-global-hourly-pds.s3.amazonaws.com/2022/41749099999.csv",
+          "unit": "mm"
+        },
+        {
+          "coverage_pct": 60.16,
+          "domain": "environment",
+          "id": "wind",
+          "label": "Station wind speed",
+          "provenance_url": "https://noaa-global-hourly-pds.s3.amazonaws.com/2022/41749099999.csv",
+          "unit": "m/s"
+        },
+        {
+          "coverage_pct": 59.93,
+          "domain": "environment",
+          "id": "pressure",
+          "label": "Station sea-level pressure",
+          "provenance_url": "https://noaa-global-hourly-pds.s3.amazonaws.com/2022/41749099999.csv",
+          "unit": "hPa"
+        }
+      ],
+      "split": {
+        "calibration": 80,
+        "test": 456,
+        "training": 320
+      },
+      "detection": {
+        "comparisons": [
+          {
+            "event_recall": 1.0,
+            "f1": 0.2564102564102564,
+            "false_alerts": 0,
+            "false_negatives": 29,
+            "false_positives": 0,
+            "mean_detection_delay_hours": 39.0,
+            "method": "seasonal_z_score",
+            "precision": 1.0,
+            "recall": 0.14705882352941177,
+            "samples": 124,
+            "true_positives": 5
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.1111111111111111,
+            "false_alerts": 0,
+            "false_negatives": 32,
+            "false_positives": 0,
+            "mean_detection_delay_hours": 102.0,
+            "method": "isolation_forest",
+            "precision": 1.0,
+            "recall": 0.058823529411764705,
+            "samples": 124,
+            "true_positives": 2
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.2564102564102564,
+            "false_alerts": 0,
+            "false_negatives": 29,
+            "false_positives": 0,
+            "mean_detection_delay_hours": 39.0,
+            "method": "quality_aware_fusion",
+            "precision": 1.0,
+            "recall": 0.14705882352941177,
+            "samples": 124,
+            "true_positives": 5
+          }
+        ],
+        "label_definition": "Overlap with the documented event interval. Event-window association only.",
+        "label_kind": "event_window_proxy",
+        "missing_test_samples": 332,
+        "status": "heldout_evaluated",
+        "test_event_windows": 1
+      },
+      "forecast": {
+        "by_horizon": {
+          "3.0": {
+            "persistence": {
+              "mae": 2.6666666666666665,
+              "rmse": 6.150880695748645,
+              "samples": 12
+            },
+            "quantile_gradient_boosting": {
+              "mae": 0.75,
+              "rmse": 2.101586702153082,
+              "samples": 12
+            },
+            "seasonal": {
+              "mae": 1.0833333333333333,
+              "rmse": 2.3979157616563596,
+              "samples": 12
+            }
+          },
+          "6.0": {
+            "persistence": {
+              "mae": 2.857142857142857,
+              "rmse": 7.671840904055744,
+              "samples": 14
+            },
+            "quantile_gradient_boosting": {
+              "mae": 4.571428571428571,
+              "rmse": 13.706098746804026,
+              "samples": 14
+            },
+            "seasonal": {
+              "mae": 5.642857142857143,
+              "rmse": 14.854051876267874,
+              "samples": 14
+            }
+          }
+        },
+        "candidate_origins": 96,
+        "forecast_metrics": {
+          "persistence": {
+            "mae": 2.857142857142857,
+            "rmse": 7.671840904055744,
+            "samples": 14
+          },
+          "quantile_gradient_boosting": {
+            "mae": 4.571428571428571,
+            "rmse": 13.706098746804026,
+            "samples": 14
+          },
+          "seasonal": {
+            "mae": 5.642857142857143,
+            "rmse": 14.854051876267874,
+            "samples": 14
+          }
+        },
+        "horizon_hours": 6.0,
+        "interval_nominal_coverage": 0.8,
+        "interval_observed_coverage": 0.7857142857142857,
+        "origins_evaluated": 20,
+        "status": "heldout_evaluated",
+        "target": "Reported 3-hour precipitation",
+        "unit": "mm"
+      },
+      "advance_warning": {
+        "horizon_hours": 6.0,
+        "message": "Training and calibration must each contain normal and pre-onset examples. A single heldout incident cannot train a validated warning classifier.",
+        "purge_samples_per_boundary": 2,
+        "status": "insufficient_labels",
+        "target": "Annotated anomaly-window onset in the next 6.0 hours, conditional on being outside a labelled window."
+      },
+      "software_versions": {
+        "numpy": "2.4.6",
+        "pandas": "3.1.1",
+        "python": "3.11.18",
+        "scikit-learn": "1.9.1"
+      },
+      "parameters": {
+        "forecast_max_depth": 2,
+        "forecast_quantiles": [
+          0.1,
+          0.5,
+          0.9
+        ],
+        "forecast_trees": 35,
+        "isolation_calibration_quantile": 0.99,
+        "isolation_forest_trees": 80,
+        "normalizer_medians": [
+          0.0,
+          3.1,
+          998.0
+        ],
+        "normalizer_scales": [
+          3.9794282452452223,
+          1.7288130891933127,
+          49.900000000000006
+        ],
+        "quantile_crossing_correction": "interval encloses all three predicted quantiles",
+        "seasonal_period_samples": 8,
+        "seed": 42,
+        "warning_horizon_hours": 6,
+        "warning_threshold_selection": "maximum calibration F1 over 201 probability quantiles",
+        "z_threshold": 3
+      },
+      "provenance": [
+        {
+          "archive_key": "historical/raw/51f5cbbb6b0a1a08c11c2f44e27e744d774a45bdf37eded7f055a4b7dcd182a3.bin",
+          "name": "NOAA ISD station observations",
+          "retrieved_at": "2026-11-26T23:31:04.154745+00:00",
+          "sha256": "0bb88db1c30c7a43fb9d6fe51bd44a4883921db1058260927ec06c1d4b0311c1",
+          "size_bytes": 880128,
+          "url": "https://noaa-global-hourly-pds.s3.amazonaws.com/2022/41749099999.csv"
+        },
+        {
+          "name": "Case documentation / label provenance",
+          "url": "https://earthobservatory.nasa.gov/images/150279/devastating-floods-in-pakistan"
+        }
+      ],
+      "limitations": [
+        "Single NOAA station: NAWABSHAH, PK (41749099999). It does not measure regional infrastructure damage or flood extent.",
+        "Only accepted ISD quality flags are used; missing readings remain null. Precipitation is a reported accumulation, not an inferred flood boundary.",
+        "Documented event-window labels are a coarse association target, not independent hour-level operational anomaly ground truth.",
+        "A single incident with normal-only pre-event training cannot validate a fitted advance-warning classifier.",
+        "Archives may include later revisions. Observation time is not proof of original publication availability; retrospective results do not establish live prediction accuracy.",
+        "Models and normalization fit training observations only; IF thresholds and warning calibration use the separate calibration interval.",
+        "Anomaly normal-training selection uses the supplied training labels. Missing primary measurements are excluded from scoring, not treated as zero.",
+        "Numeric forecasts use at most 96 uniformly spaced heldout origins and no future actuals in recursive paths. These are retrospective archive tests.",
+        "Warning features use strictly earlier samples. Targets crossing split boundaries are purged; ongoing labelled windows are excluded from onset-warning metrics.",
+        "False-alert counts are sample counts at the native cadence, not independent incident counts. No aggregate cross-case accuracy is inferred.",
+        "These are retrospective point estimates on few events, not statistical proof of generalization or validated live advance-warning capability."
+      ]
+    },
+    {
+      "case_id": "faa-notam-2023",
+      "title": "FAA NOTAM outage and ground stop",
+      "dataset_hash": "6905aac9354d6a23516aceb6a212c3583b3f7262357d75d832656204a71ae8a0",
+      "cadence_hours": 1,
+      "samples": 744,
+      "label_kind": "event_window_proxy",
+      "label_definition": "Overlap with the documented FAA 11:30\u201314:00 UTC ground stop. Event-window association only.",
+      "channels": [
+        {
+          "coverage_pct": 76.21,
+          "domain": "aviation",
+          "id": "departure_delay",
+          "label": "Mean departure delay by scheduled departure hour",
+          "provenance_url": "https://transtats.bts.gov/PREZIP/On_Time_Reporting_Carrier_On_Time_Performance_1987_present_2023_1.zip",
+          "unit": "minutes"
+        },
+        {
+          "coverage_pct": 76.21,
+          "domain": "aviation",
+          "id": "cancelled_fraction",
+          "label": "Cancelled share of scheduled flights",
+          "provenance_url": "https://transtats.bts.gov/PREZIP/On_Time_Reporting_Carrier_On_Time_Performance_1987_present_2023_1.zip",
+          "unit": "fraction"
+        },
+        {
+          "coverage_pct": 100.0,
+          "domain": "aviation",
+          "id": "scheduled_flights",
+          "label": "Scheduled departures \u2014 JFK/LGA/EWR/BOS",
+          "provenance_url": "https://transtats.bts.gov/PREZIP/On_Time_Reporting_Carrier_On_Time_Performance_1987_present_2023_1.zip",
+          "unit": "flights/hour"
+        }
+      ],
+      "split": {
+        "calibration": 50,
+        "test": 498,
+        "training": 196
+      },
+      "detection": {
+        "comparisons": [
+          {
+            "event_recall": 1.0,
+            "f1": 0.4,
+            "false_alerts": 9,
+            "false_negatives": 0,
+            "false_positives": 9,
+            "mean_detection_delay_hours": 0.0,
+            "method": "seasonal_z_score",
+            "precision": 0.25,
+            "recall": 1.0,
+            "samples": 378,
+            "true_positives": 3
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.2222222222222222,
+            "false_alerts": 13,
+            "false_negatives": 1,
+            "false_positives": 13,
+            "mean_detection_delay_hours": 1.0,
+            "method": "isolation_forest",
+            "precision": 0.13333333333333333,
+            "recall": 0.6666666666666666,
+            "samples": 378,
+            "true_positives": 2
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.17142857142857143,
+            "false_alerts": 29,
+            "false_negatives": 0,
+            "false_positives": 29,
+            "mean_detection_delay_hours": 0.0,
+            "method": "quality_aware_fusion",
+            "precision": 0.09375,
+            "recall": 1.0,
+            "samples": 378,
+            "true_positives": 3
+          }
+        ],
+        "label_definition": "Overlap with the documented FAA 11:30\u201314:00 UTC ground stop. Event-window association only.",
+        "label_kind": "event_window_proxy",
+        "missing_test_samples": 120,
+        "status": "heldout_evaluated",
+        "test_event_windows": 1
+      },
+      "forecast": {
+        "by_horizon": {
+          "1.0": {
+            "persistence": {
+              "mae": 7.145676402912862,
+              "rmse": 11.50665094833759,
+              "samples": 70
+            },
+            "quantile_gradient_boosting": {
+              "mae": 9.307144172858356,
+              "rmse": 15.131277978183855,
+              "samples": 70
+            },
+            "seasonal": {
+              "mae": 17.69282760204832,
+              "rmse": 28.35977853227092,
+              "samples": 70
+            }
+          },
+          "3.0": {
+            "persistence": {
+              "mae": 7.304245372466983,
+              "rmse": 9.95103410037554,
+              "samples": 61
+            },
+            "quantile_gradient_boosting": {
+              "mae": 8.81112538507769,
+              "rmse": 13.891667398510322,
+              "samples": 61
+            },
+            "seasonal": {
+              "mae": 17.306944962338832,
+              "rmse": 28.21759904978375,
+              "samples": 61
+            }
+          },
+          "6.0": {
+            "persistence": {
+              "mae": 13.12778789981179,
+              "rmse": 20.31543277793475,
+              "samples": 50
+            },
+            "quantile_gradient_boosting": {
+              "mae": 13.081694712734533,
+              "rmse": 20.715913123289273,
+              "samples": 50
+            },
+            "seasonal": {
+              "mae": 18.57433173731001,
+              "rmse": 28.062829997171033,
+              "samples": 50
+            }
+          }
+        },
+        "candidate_origins": 96,
+        "forecast_metrics": {
+          "persistence": {
+            "mae": 13.12778789981179,
+            "rmse": 20.31543277793475,
+            "samples": 50
+          },
+          "quantile_gradient_boosting": {
+            "mae": 13.081694712734533,
+            "rmse": 20.715913123289273,
+            "samples": 50
+          },
+          "seasonal": {
+            "mae": 18.57433173731001,
+            "rmse": 28.062829997171033,
+            "samples": 50
+          }
+        },
+        "horizon_hours": 6.0,
+        "interval_nominal_coverage": 0.8,
+        "interval_observed_coverage": 0.7,
+        "origins_evaluated": 73,
+        "status": "heldout_evaluated",
+        "target": "Mean departure delay by scheduled departure hour",
+        "unit": "minutes"
+      },
+      "advance_warning": {
+        "horizon_hours": 6.0,
+        "message": "BTS outcomes were published later and have no original per-record availability timestamp; they cannot substantiate a live advance-warning claim.",
+        "status": "unsupported_source_availability",
+        "target": "Annotated anomaly-window onset in the next 6.0 hours, conditional on being outside a labelled window."
+      },
+      "software_versions": {
+        "numpy": "2.4.6",
+        "pandas": "3.1.1",
+        "python": "3.11.18",
+        "scikit-learn": "1.9.1"
+      },
+      "parameters": {
+        "forecast_max_depth": 2,
+        "forecast_quantiles": [
+          0.1,
+          0.5,
+          0.9
+        ],
+        "forecast_trees": 35,
+        "isolation_calibration_quantile": 0.99,
+        "isolation_forest_trees": 80,
+        "normalizer_medians": [
+          14.537454100367196,
+          0.0,
+          67.0
+        ],
+        "normalizer_scales": [
+          18.036182318456543,
+          0.01790146448587031,
+          38.415774907789256
+        ],
+        "quantile_crossing_correction": "interval encloses all three predicted quantiles",
+        "seasonal_period_samples": 24,
+        "seed": 42,
+        "warning_horizon_hours": 6,
+        "warning_threshold_selection": "maximum calibration F1 over 201 probability quantiles",
+        "z_threshold": 3
+      },
+      "provenance": [
+        {
+          "archive_key": "historical/raw/5e9031ed6c26035cb310ee46224c166927b507cc6395e454a0d737c94838723e.bin",
+          "name": "BTS January 2023 on-time flight performance",
+          "retrieved_at": "2026-11-26T23:32:47.064169+00:00",
+          "sha256": "327924faa362d360747e9e4cf37f461c877441916321754f1789fadd61fd403a",
+          "size_bytes": 27068766,
+          "url": "https://transtats.bts.gov/PREZIP/On_Time_Reporting_Carrier_On_Time_Performance_1987_present_2023_1.zip"
+        },
+        {
+          "name": "Case documentation / label provenance",
+          "url": "https://www.faa.gov/newsroom/faa-notam-statement"
+        }
+      ],
+      "limitations": [
+        "Four Eastern-time airports only; not a census of US air traffic.",
+        "Actual BTS delay/cancellation outcomes were published later and grouped by scheduled departure time. They are retrospective outcomes, not live-available predictors.",
+        "Documented event-window labels are a coarse association target, not independent hour-level operational anomaly ground truth.",
+        "A single incident with normal-only pre-event training cannot validate a fitted advance-warning classifier.",
+        "Archives may include later revisions. Observation time is not proof of original publication availability; retrospective results do not establish live prediction accuracy.",
+        "Models and normalization fit training observations only; IF thresholds and warning calibration use the separate calibration interval.",
+        "Anomaly normal-training selection uses the supplied training labels. Missing primary measurements are excluded from scoring, not treated as zero.",
+        "Numeric forecasts use at most 96 uniformly spaced heldout origins and no future actuals in recursive paths. These are retrospective archive tests.",
+        "Warning features use strictly earlier samples. Targets crossing split boundaries are purged; ongoing labelled windows are excluded from onset-warning metrics.",
+        "False-alert counts are sample counts at the native cadence, not independent incident counts. No aggregate cross-case accuracy is inferred.",
+        "These are retrospective point estimates on few events, not statistical proof of generalization or validated live advance-warning capability."
+      ]
+    },
+    {
+      "case_id": "nab-nyc-taxi",
+      "title": "NYC taxi passenger demand \u2014 independently labelled NAB benchmark",
+      "dataset_hash": "a2e5811c6972a27ea7563723161b534d89f10aca623902b8a2f936be9b50fa81",
+      "cadence_hours": 0.5,
+      "samples": 10320,
+      "label_kind": "independent_annotations",
+      "label_definition": "Published NAB anomaly windows from combined_windows.json",
+      "channels": [
+        {
+          "coverage_pct": 100.0,
+          "domain": "transit",
+          "id": "value",
+          "label": "Taxi passengers per half hour",
+          "provenance_url": "https://raw.githubusercontent.com/numenta/NAB/ea702d75cc2258d9d7dd35ca8e5e2539d71f3140/data/realKnownCause/nyc_taxi.csv",
+          "unit": "passengers/30min"
+        }
+      ],
+      "split": {
+        "calibration": 2064,
+        "test": 2064,
+        "training": 6192
+      },
+      "detection": {
+        "comparisons": [
+          {
+            "event_recall": 1.0,
+            "f1": 0.19484240687679083,
+            "false_alerts": 9,
+            "false_negatives": 553,
+            "false_positives": 9,
+            "mean_detection_delay_hours": 33.166666666666664,
+            "method": "seasonal_z_score",
+            "precision": 0.8831168831168831,
+            "recall": 0.10950080515297907,
+            "samples": 2064,
+            "true_positives": 68
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.10248901903367497,
+            "false_alerts": 27,
+            "false_negatives": 586,
+            "false_positives": 27,
+            "mean_detection_delay_hours": 53.833333333333336,
+            "method": "isolation_forest",
+            "precision": 0.5645161290322581,
+            "recall": 0.05636070853462158,
+            "samples": 2064,
+            "true_positives": 35
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.19484240687679083,
+            "false_alerts": 9,
+            "false_negatives": 553,
+            "false_positives": 9,
+            "mean_detection_delay_hours": 33.166666666666664,
+            "method": "quality_aware_fusion",
+            "precision": 0.8831168831168831,
+            "recall": 0.10950080515297907,
+            "samples": 2064,
+            "true_positives": 68
+          }
+        ],
+        "label_definition": "Published NAB anomaly windows from combined_windows.json",
+        "label_kind": "independent_annotations",
+        "missing_test_samples": 0,
+        "status": "heldout_evaluated",
+        "test_event_windows": 3
+      },
+      "forecast": {
+        "by_horizon": {
+          "0.5": {
+            "persistence": {
+              "mae": 1080.6770833333333,
+              "rmse": 1432.3704820739174,
+              "samples": 96
+            },
+            "quantile_gradient_boosting": {
+              "mae": 1162.4585314815215,
+              "rmse": 1523.5074018125208,
+              "samples": 96
+            },
+            "seasonal": {
+              "mae": 3425.4270833333335,
+              "rmse": 5463.51120598436,
+              "samples": 96
+            }
+          },
+          "3.0": {
+            "persistence": {
+              "mae": 5315.302083333333,
+              "rmse": 6802.434828335366,
+              "samples": 96
+            },
+            "quantile_gradient_boosting": {
+              "mae": 2685.687971849254,
+              "rmse": 3618.8744982704998,
+              "samples": 96
+            },
+            "seasonal": {
+              "mae": 3446.5833333333335,
+              "rmse": 5405.863369604649,
+              "samples": 96
+            }
+          },
+          "6.0": {
+            "persistence": {
+              "mae": 8420.510416666666,
+              "rmse": 10338.612136367725,
+              "samples": 96
+            },
+            "quantile_gradient_boosting": {
+              "mae": 3267.0673115006116,
+              "rmse": 4323.974147137036,
+              "samples": 96
+            },
+            "seasonal": {
+              "mae": 3249.2291666666665,
+              "rmse": 5027.535417577881,
+              "samples": 96
+            }
+          }
+        },
+        "candidate_origins": 96,
+        "forecast_metrics": {
+          "persistence": {
+            "mae": 8420.510416666666,
+            "rmse": 10338.612136367725,
+            "samples": 96
+          },
+          "quantile_gradient_boosting": {
+            "mae": 3267.0673115006116,
+            "rmse": 4323.974147137036,
+            "samples": 96
+          },
+          "seasonal": {
+            "mae": 3249.2291666666665,
+            "rmse": 5027.535417577881,
+            "samples": 96
+          }
+        },
+        "horizon_hours": 6.0,
+        "interval_nominal_coverage": 0.8,
+        "interval_observed_coverage": 0.9270833333333334,
+        "origins_evaluated": 96,
+        "status": "heldout_evaluated",
+        "target": "Taxi passengers per half hour",
+        "unit": "passengers/30min"
+      },
+      "advance_warning": {
+        "brier_score": 0.024845381984832847,
+        "brier_skill_score": 0.0085702586781492,
+        "comparisons": [
+          {
+            "brier_score": 0.024845381984832847,
+            "method": "calibrated_logistic_onset",
+            "precision": 0.017793594306049824,
+            "recall": 0.1388888888888889
+          },
+          {
+            "brier_score": 0.025060153987015825,
+            "method": "training_prevalence",
+            "precision": null,
+            "recall": null
+          }
+        ],
+        "event_onsets": 3,
+        "event_recall": 0.6666666666666666,
+        "events_with_advance_warning": 2,
+        "f1": 0.031545741324921134,
+        "false_alerts": 276,
+        "false_negatives": 31,
+        "false_positives": 276,
+        "false_warning_hours": 138.0,
+        "horizon_hours": 6.0,
+        "mean_warning_lead_hours": 3.5,
+        "message": "Heldout onset warning evaluation. Brier score improves on the training-prevalence baseline.",
+        "precision": 0.017793594306049824,
+        "purge_samples_per_boundary": 12,
+        "recall": 0.1388888888888889,
+        "reference_brier_score": 0.025060153987015825,
+        "reliability_bins": [
+          {
+            "lower": 0,
+            "mean_probability": 0.006301199825459789,
+            "observed_rate": 0.025157232704402517,
+            "samples": 1431,
+            "upper": 0.2
+          },
+          {
+            "lower": 0.2,
+            "mean_probability": null,
+            "observed_rate": null,
+            "samples": 0,
+            "upper": 0.4
+          },
+          {
+            "lower": 0.4,
+            "mean_probability": null,
+            "observed_rate": null,
+            "samples": 0,
+            "upper": 0.6000000000000001
+          },
+          {
+            "lower": 0.6,
+            "mean_probability": null,
+            "observed_rate": null,
+            "samples": 0,
+            "upper": 0.8
+          },
+          {
+            "lower": 0.8,
+            "mean_probability": null,
+            "observed_rate": null,
+            "samples": 0,
+            "upper": 1.0
+          }
+        ],
+        "samples": 1431,
+        "status": "heldout_evaluated",
+        "target": "Annotated anomaly-window onset in the next 6.0 hours, conditional on being outside a labelled window.",
+        "threshold": 0.008794268977193665,
+        "true_positives": 5
+      },
+      "software_versions": {
+        "numpy": "2.4.6",
+        "pandas": "3.1.1",
+        "python": "3.11.18",
+        "scikit-learn": "1.9.1"
+      },
+      "parameters": {
+        "forecast_max_depth": 2,
+        "forecast_quantiles": [
+          0.1,
+          0.5,
+          0.9
+        ],
+        "forecast_trees": 35,
+        "isolation_calibration_quantile": 0.99,
+        "isolation_forest_trees": 80,
+        "normalizer_medians": [
+          16867.0
+        ],
+        "normalizer_scales": [
+          6806.7731556601775
+        ],
+        "quantile_crossing_correction": "interval encloses all three predicted quantiles",
+        "seasonal_period_samples": 48,
+        "seed": 42,
+        "warning_horizon_hours": 6,
+        "warning_threshold_selection": "maximum calibration F1 over 201 probability quantiles",
+        "z_threshold": 3
+      },
+      "provenance": [
+        {
+          "archive_key": "historical/raw/680bb9dbb6494f2974d781ae3892c64b14365dc1aca60ae164235b9eceb57e24.bin",
+          "name": "Numenta Anomaly Benchmark real observations",
+          "retrieved_at": "2026-11-26T23:30:32.364708+00:00",
+          "sha256": "d8fa6f7f0734bf5c8be12c52a94e20a82664c397d9dec4449156bd453d32856d",
+          "size_bytes": 265771,
+          "url": "https://raw.githubusercontent.com/numenta/NAB/ea702d75cc2258d9d7dd35ca8e5e2539d71f3140/data/realKnownCause/nyc_taxi.csv"
+        },
+        {
+          "archive_key": "historical/raw/5335dfb427e96d45c5a239b04db2e6973aad03fbcfa33328b8431aa1a4a14bbb.bin",
+          "name": "NAB published anomaly windows",
+          "retrieved_at": "2026-11-26T23:30:32.680341+00:00",
+          "sha256": "1e1fbc4601321aad8d0f8b3784c8134299379f68f6c1f7777565f8ffd57ab6b1",
+          "size_bytes": 15359,
+          "url": "https://raw.githubusercontent.com/numenta/NAB/ea702d75cc2258d9d7dd35ca8e5e2539d71f3140/labels/combined_windows.json"
+        },
+        {
+          "archive_key": "historical/raw/6393c4debd5cc7c681b5d48833db4ae368faed5775f271bb76d87429f4048e7a.bin",
+          "name": "NAB license notice",
+          "retrieved_at": "2026-11-26T23:30:33.021794+00:00",
+          "sha256": "0a0b4d0b10cb1f7ed9ab2993ef93defc03447e6eba9daca1315dd32dae4877e3",
+          "size_bytes": 1056,
+          "url": "https://raw.githubusercontent.com/numenta/NAB/ea702d75cc2258d9d7dd35ca8e5e2539d71f3140/LICENSE.txt"
+        },
+        {
+          "name": "Case documentation / label provenance",
+          "url": "https://raw.githubusercontent.com/numenta/NAB/ea702d75cc2258d9d7dd35ca8e5e2539d71f3140/data/realKnownCause/nyc_taxi.csv"
+        }
+      ],
+      "limitations": [
+        "Provider timestamps lack timezone metadata; the UTC-formatted replay axis is nominal, not a verified wall-clock timezone.",
+        "Absent native-cadence timestamps are represented as null slots; no measurement is interpolated or fabricated.",
+        "Published NAB windows include tolerance around anomalies; lead time is relative to annotated window onset, not confirmed physical failure onset.",
+        "This evaluator reports its own metrics, not the official NAB score.",
+        "Archives may include later revisions. Observation time is not proof of original publication availability; retrospective results do not establish live prediction accuracy.",
+        "Models and normalization fit training observations only; IF thresholds and warning calibration use the separate calibration interval.",
+        "Anomaly normal-training selection uses the supplied training labels. Missing primary measurements are excluded from scoring, not treated as zero.",
+        "Numeric forecasts use at most 96 uniformly spaced heldout origins and no future actuals in recursive paths. These are retrospective archive tests.",
+        "Warning features use strictly earlier samples. Targets crossing split boundaries are purged; ongoing labelled windows are excluded from onset-warning metrics.",
+        "False-alert counts are sample counts at the native cadence, not independent incident counts. No aggregate cross-case accuracy is inferred.",
+        "These are retrospective point estimates on few events, not statistical proof of generalization or validated live advance-warning capability."
+      ]
+    },
+    {
+      "case_id": "nab-machine-temperature",
+      "title": "Machine temperature \u2014 independently labelled NAB benchmark",
+      "dataset_hash": "bc10773970aa4ea2f45b10465a93d67c788032026bcb831088f5f5d40cfed5c8",
+      "cadence_hours": 0.08333333333333333,
+      "samples": 22683,
+      "label_kind": "independent_annotations",
+      "label_definition": "Published NAB anomaly windows from combined_windows.json",
+      "channels": [
+        {
+          "ambiguous_timestamps": 12,
+          "coverage_pct": 99.95,
+          "domain": "infrastructure",
+          "excluded_ambiguous_readings": 24,
+          "id": "value",
+          "label": "Equipment temperature",
+          "provenance_url": "https://raw.githubusercontent.com/numenta/NAB/ea702d75cc2258d9d7dd35ca8e5e2539d71f3140/data/realKnownCause/machine_temperature_system_failure.csv",
+          "source_sample_count": 22695,
+          "unit": "provider temperature units"
+        }
+      ],
+      "split": {
+        "calibration": 4537,
+        "test": 4537,
+        "training": 13609
+      },
+      "detection": {
+        "comparisons": [
+          {
+            "event_recall": 1.0,
+            "f1": 0.9644128113879004,
+            "false_alerts": 15,
+            "false_negatives": 25,
+            "false_positives": 15,
+            "mean_detection_delay_hours": 0.0,
+            "method": "seasonal_z_score",
+            "precision": 0.9730700179533214,
+            "recall": 0.9559082892416225,
+            "samples": 4537,
+            "true_positives": 542
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.9342105263157895,
+            "false_alerts": 0,
+            "false_negatives": 70,
+            "false_positives": 0,
+            "mean_detection_delay_hours": 3.4166666666666665,
+            "method": "isolation_forest",
+            "precision": 1.0,
+            "recall": 0.8765432098765432,
+            "samples": 4537,
+            "true_positives": 497
+          },
+          {
+            "event_recall": 1.0,
+            "f1": 0.9434290687554395,
+            "false_alerts": 40,
+            "false_negatives": 25,
+            "false_positives": 40,
+            "mean_detection_delay_hours": 0.0,
+            "method": "quality_aware_fusion",
+            "precision": 0.9312714776632303,
+            "recall": 0.9559082892416225,
+            "samples": 4537,
+            "true_positives": 542
+          }
+        ],
+        "label_definition": "Published NAB anomaly windows from combined_windows.json",
+        "label_kind": "independent_annotations",
+        "missing_test_samples": 0,
+        "status": "heldout_evaluated",
+        "test_event_windows": 1
+      },
+      "forecast": {
+        "by_horizon": {
+          "0.083333": {
+            "persistence": {
+              "mae": 0.8406675608333328,
+              "rmse": 1.048013741000517,
+              "samples": 96
+            },
+            "quantile_gradient_boosting": {
+              "mae": 3.234453037096824,
+              "rmse": 7.792121059682129,
+              "samples": 96
+            },
+            "seasonal": {
+              "mae": 13.602060877291663,
+              "rmse": 22.488028102351787,
+              "samples": 96
+            }
+          },
+          "3.0": {
+            "persistence": {
+              "mae": 3.5852158232291664,
+              "rmse": 7.645141142336569,
+              "samples": 96
+            },
+            "quantile_gradient_boosting": {
+              "mae": 5.308012917904612,
+              "rmse": 9.432816517923891,
+              "samples": 96
+            },
+            "seasonal": {
+              "mae": 13.722351257187498,
+              "rmse": 22.490530157343308,
+              "samples": 96
+            }
+          },
+          "6.0": {
+            "persistence": {
+              "mae": 5.2347424049999995,
+              "rmse": 9.983503448779501,
+              "samples": 96
+            },
+            "quantile_gradient_boosting": {
+              "mae": 6.270813259045201,
+              "rmse": 10.094331080326166,
+              "samples": 96
+            },
+            "seasonal": {
+              "mae": 13.516899592500002,
+              "rmse": 22.38651171788408,
+              "samples": 96
+            }
+          }
+        },
+        "candidate_origins": 96,
+        "forecast_metrics": {
+          "persistence": {
+            "mae": 5.2347424049999995,
+            "rmse": 9.983503448779501,
+            "samples": 96
+          },
+          "quantile_gradient_boosting": {
+            "mae": 6.270813259045201,
+            "rmse": 10.094331080326166,
+            "samples": 96
+          },
+          "seasonal": {
+            "mae": 13.516899592500002,
+            "rmse": 22.38651171788408,
+            "samples": 96
+          }
+        },
+        "horizon_hours": 6.0,
+        "interval_nominal_coverage": 0.8,
+        "interval_observed_coverage": 0.9583333333333334,
+        "origins_evaluated": 96,
+        "status": "heldout_evaluated",
+        "target": "Equipment temperature",
+        "unit": "provider temperature units"
+      },
+      "advance_warning": {
+        "brier_score": 0.015140974085977598,
+        "brier_skill_score": 0.167013078141226,
+        "comparisons": [
+          {
+            "brier_score": 0.015140974085977598,
+            "method": "calibrated_logistic_onset",
+            "precision": 0.9701492537313433,
+            "recall": 0.9027777777777778
+          },
+          {
+            "brier_score": 0.018176724854444503,
+            "method": "training_prevalence",
+            "precision": null,
+            "recall": null
+          }
+        ],
+        "event_onsets": 1,
+        "event_recall": 1.0,
+        "events_with_advance_warning": 1,
+        "f1": 0.935251798561151,
+        "false_alerts": 2,
+        "false_negatives": 7,
+        "false_positives": 2,
+        "false_warning_hours": 0.16666666666666666,
+        "horizon_hours": 6.0,
+        "mean_warning_lead_hours": 5.5,
+        "message": "Heldout onset warning evaluation. Brier score improves on the training-prevalence baseline.",
+        "precision": 0.9701492537313433,
+        "purge_samples_per_boundary": 72,
+        "recall": 0.9027777777777778,
+        "reference_brier_score": 0.018176724854444503,
+        "reliability_bins": [
+          {
+            "lower": 0,
+            "mean_probability": 0.01528635640983444,
+            "observed_rate": 0.018471010774756286,
+            "samples": 3898,
+            "upper": 0.2
+          },
+          {
+            "lower": 0.2,
+            "mean_probability": null,
+            "observed_rate": null,
+            "samples": 0,
+            "upper": 0.4
+          },
+          {
+            "lower": 0.4,
+            "mean_probability": null,
+            "observed_rate": null,
+            "samples": 0,
+            "upper": 0.6000000000000001
+          },
+          {
+            "lower": 0.6,
+            "mean_probability": null,
+            "observed_rate": null,
+            "samples": 0,
+            "upper": 0.8
+          },
+          {
+            "lower": 0.8,
+            "mean_probability": null,
+            "observed_rate": null,
+            "samples": 0,
+            "upper": 1.0
+          }
+        ],
+        "samples": 3898,
+        "status": "heldout_evaluated",
+        "target": "Annotated anomaly-window onset in the next 6.0 hours, conditional on being outside a labelled window.",
+        "threshold": 0.06264589915785725,
+        "true_positives": 65
+      },
+      "software_versions": {
+        "numpy": "2.4.6",
+        "pandas": "3.1.1",
+        "python": "3.11.18",
+        "scikit-learn": "1.9.1"
+      },
+      "parameters": {
+        "forecast_max_depth": 2,
+        "forecast_quantiles": [
+          0.1,
+          0.5,
+          0.9
+        ],
+        "forecast_trees": 35,
+        "isolation_calibration_quantile": 0.99,
+        "isolation_forest_trees": 80,
+        "normalizer_medians": [
+          89.3875172
+        ],
+        "normalizer_scales": [
+          9.214744135005649
+        ],
+        "quantile_crossing_correction": "interval encloses all three predicted quantiles",
+        "seasonal_period_samples": 288,
+        "seed": 42,
+        "warning_horizon_hours": 6,
+        "warning_threshold_selection": "maximum calibration F1 over 201 probability quantiles",
+        "z_threshold": 3
+      },
+      "provenance": [
+        {
+          "archive_key": "historical/raw/d35f52a0d0373fddc04eed76e53ae005020b8829cfae7a08f31a35381162af5d.bin",
+          "name": "Numenta Anomaly Benchmark real observations",
+          "retrieved_at": "2026-11-26T23:31:31.886487+00:00",
+          "sha256": "92bf5b87fc7f9bba8ca0b7ec63ccaac8cb4a1371a258e8c29a10ae9c018d82a4",
+          "size_bytes": 732223,
+          "url": "https://raw.githubusercontent.com/numenta/NAB/ea702d75cc2258d9d7dd35ca8e5e2539d71f3140/data/realKnownCause/machine_temperature_system_failure.csv"
+        },
+        {
+          "archive_key": "historical/raw/5335dfb427e96d45c5a239b04db2e6973aad03fbcfa33328b8431aa1a4a14bbb.bin",
+          "name": "NAB published anomaly windows",
+          "retrieved_at": "2026-11-26T23:30:32.680341+00:00",
+          "sha256": "1e1fbc4601321aad8d0f8b3784c8134299379f68f6c1f7777565f8ffd57ab6b1",
+          "size_bytes": 15359,
+          "url": "https://raw.githubusercontent.com/numenta/NAB/ea702d75cc2258d9d7dd35ca8e5e2539d71f3140/labels/combined_windows.json"
+        },
+        {
+          "archive_key": "historical/raw/6393c4debd5cc7c681b5d48833db4ae368faed5775f271bb76d87429f4048e7a.bin",
+          "name": "NAB license notice",
+          "retrieved_at": "2026-11-26T23:30:33.021794+00:00",
+          "sha256": "0a0b4d0b10cb1f7ed9ab2993ef93defc03447e6eba9daca1315dd32dae4877e3",
+          "size_bytes": 1056,
+          "url": "https://raw.githubusercontent.com/numenta/NAB/ea702d75cc2258d9d7dd35ca8e5e2539d71f3140/LICENSE.txt"
+        },
+        {
+          "name": "Case documentation / label provenance",
+          "url": "https://raw.githubusercontent.com/numenta/NAB/ea702d75cc2258d9d7dd35ca8e5e2539d71f3140/data/realKnownCause/machine_temperature_system_failure.csv"
+        }
+      ],
+      "limitations": [
+        "Provider timestamps lack timezone metadata; the UTC-formatted replay axis is nominal, not a verified wall-clock timezone.",
+        "Absent native-cadence timestamps are represented as null slots; no measurement is interpolated or fabricated.",
+        "Published NAB windows include tolerance around anomalies; lead time is relative to annotated window onset, not confirmed physical failure onset.",
+        "This evaluator reports its own metrics, not the official NAB score.",
+        "The source contains a clock reversal: 12 duplicate timestamps (24 ambiguous readings) are excluded as null. No ordering or replacement value is inferred; original source bytes remain archived.",
+        "Archives may include later revisions. Observation time is not proof of original publication availability; retrospective results do not establish live prediction accuracy.",
+        "Models and normalization fit training observations only; IF thresholds and warning calibration use the separate calibration interval.",
+        "Anomaly normal-training selection uses the supplied training labels. Missing primary measurements are excluded from scoring, not treated as zero.",
+        "Numeric forecasts use at most 96 uniformly spaced heldout origins and no future actuals in recursive paths. These are retrospective archive tests.",
+        "Warning features use strictly earlier samples. Targets crossing split boundaries are purged; ongoing labelled windows are excluded from onset-warning metrics.",
+        "False-alert counts are sample counts at the native cadence, not independent incident counts. No aggregate cross-case accuracy is inferred.",
+        "These are retrospective point estimates on few events, not statistical proof of generalization or validated live advance-warning capability."
+      ]
+    }
+  ]
+}

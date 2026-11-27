@@ -92,8 +92,9 @@ def calculate_route_deviation(lat_p: float, lon_p: float, heading: float,
 def get_live_flights(db: Session, limit: int = 3000, window_minutes: int = 60) -> list[dict]:
     """Latest position of every aircraft seen in the most recent window of data,
     including general travel route endpoints and cross-track deviation metrics."""
-    from app.core.config import get_settings
+    from app.core.config import get_settings, request_as_of
 
+    asof = request_as_of.get()
     mode = get_settings().DATA_MODE
     src_filter = "fo.source = 'demo_dataset'" if mode == "demo" else "fo.source != 'demo_dataset'"
     latest_filter = "source = 'demo_dataset'" if mode == "demo" else "source != 'demo_dataset'"
@@ -103,7 +104,7 @@ def get_live_flights(db: Session, limit: int = 3000, window_minutes: int = 60) -
         WITH latest AS (
             SELECT COALESCE(MAX(timestamp), now()) AS t
             FROM flight_observations
-            WHERE {latest_filter}
+            WHERE {latest_filter} AND timestamp <= COALESCE(CAST(:asof AS timestamptz), now()) AND ingested_at <= COALESCE(CAST(:asof AS timestamptz), now())
         )
         SELECT DISTINCT ON (fo.icao24)
                fo.icao24, fo.callsign, ST_Y(fo.position), ST_X(fo.position),
@@ -117,11 +118,11 @@ def get_live_flights(db: Session, limit: int = 3000, window_minutes: int = 60) -
         LEFT JOIN airports ap1 ON ap1.id = fr.origin_airport_id
         LEFT JOIN airports ap2 ON ap2.id = fr.dest_airport_id, latest
         WHERE fo.timestamp >= latest.t - make_interval(mins => :mins)
-          AND {src_filter}
+          AND {src_filter} AND fo.timestamp <= COALESCE(CAST(:asof AS timestamptz), now()) AND fo.ingested_at <= COALESCE(CAST(:asof AS timestamptz), now())
         ORDER BY fo.icao24, fo.timestamp DESC
         LIMIT :limit
         """
-    ), {"limit": limit, "mins": window_minutes}).all()
+    ), {"limit": limit, "mins": window_minutes, "asof": asof}).all()
 
     out = []
     for r in rows:
@@ -161,8 +162,9 @@ def get_live_flights(db: Session, limit: int = 3000, window_minutes: int = 60) -
 
 def get_flight_detail(db: Session, icao24: str) -> dict | None:
     """Retrieve full flight route, waypoints, trail and deviation for a specific aircraft."""
-    from app.core.config import get_settings
+    from app.core.config import get_settings, request_as_of
 
+    asof = request_as_of.get()
     mode = get_settings().DATA_MODE
     src_filter = "fo.source = 'demo_dataset'" if mode == "demo" else "fo.source != 'demo_dataset'"
 
@@ -178,11 +180,11 @@ def get_flight_detail(db: Session, icao24: str) -> dict | None:
         LEFT JOIN regions r ON r.id = fr.region_id
         LEFT JOIN airports ap1 ON ap1.id = fr.origin_airport_id
         LEFT JOIN airports ap2 ON ap2.id = fr.dest_airport_id
-        WHERE fo.icao24 = :icao AND {src_filter}
+        WHERE fo.icao24 = :icao AND {src_filter} AND fo.timestamp <= COALESCE(CAST(:asof AS timestamptz), now()) AND fo.ingested_at <= COALESCE(CAST(:asof AS timestamptz), now())
         ORDER BY fo.timestamp DESC
         LIMIT 25
         """
-    ), {"icao": icao24.lower().strip()}).all()
+    ), {"icao": icao24.lower().strip(), "asof": asof}).all()
 
     if not obs:
         return None

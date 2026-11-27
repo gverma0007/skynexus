@@ -17,7 +17,7 @@ SOURCES = {
     "adsb.lol-mil": ("Air traffic", "adsb.lol military and tactical aircraft", "https://api.adsb.lol"),
     "celestrak": ("Satellites", "Orbital elements (TLE), positioned with SGP4", "https://celestrak.org"),
     "open-meteo": ("Weather", "Wind, gusts and rain at each region centre", "https://open-meteo.com"),
-    "usgs": ("Conflict & Seismic Feeds", "USGS M2.5+ and security threat events", "https://earthquake.usgs.gov"),
+    "usgs": ("Earthquakes", "USGS earthquake observations", "https://earthquake.usgs.gov"),
     "demo_dataset": ("Demo data", "Generated 8-day synthetic world", None),
 }
 
@@ -25,7 +25,7 @@ DOMAIN_LABELS = {
     "flights": "Air traffic",
     "satellites": "Satellite positions",
     "weather": "Weather",
-    "events": "Conflict & Incidents",
+    "events": "Natural hazards",
 }
 
 
@@ -85,8 +85,8 @@ def get_system_health(db: Session) -> dict:
         "live_ingest": bool(settings.LIVE_INGEST),
         "ingest_interval_s": settings.LIVE_INGEST_INTERVAL_S,
         "retention_days": settings.RETENTION_DAYS,
-        "ai_mode": "claude" if settings.ANTHROPIC_API_KEY else "template",
-        "ai_model": settings.ANTHROPIC_MODEL if settings.ANTHROPIC_API_KEY else None,
+        "ai_mode": "claude" if settings.ANTHROPIC_API_KEY and settings.ANTHROPIC_MODEL else "template",
+        "ai_model": settings.ANTHROPIC_MODEL if settings.ANTHROPIC_API_KEY and settings.ANTHROPIC_MODEL else None,
         "ingest": ingest.state,
         "sources": sources,
         "counts": counts,

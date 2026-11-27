@@ -65,7 +65,7 @@ class Satellite(Base):
     norad_id = Column(Integer, nullable=False, unique=True)
     name = Column(String(200), nullable=False)
     category = Column(String(40))  # station/weather/science/nav/earthobs/comms
-    tle_line1 = Column(String(200))
+    tle_line1 = Column(Text)
     tle_line2 = Column(String(200))
 
     observations = relationship("SatelliteObservation", back_populates="satellite")
@@ -216,6 +216,7 @@ class DisruptionIndex(Base):
 
 
 class WhatChangedReport(Base):
+    owner_session = Column(String(64), nullable=True)
     __tablename__ = "what_changed_reports"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

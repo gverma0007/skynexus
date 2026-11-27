@@ -25,10 +25,10 @@ settings = get_settings()
 engine = create_engine(
     settings.sqlalchemy_url,
     pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=5,
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
     pool_recycle=300,
-    connect_args={"options": "-c search_path=public"},
+    connect_args={"connect_timeout": 10} if settings.free_demo else {"options": "-c search_path=public"},
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
