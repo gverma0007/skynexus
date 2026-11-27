@@ -28,6 +28,12 @@ def encoded(value):return json.dumps(value,sort_keys=True,separators=(',',':'),a
 
 def read_key(key):
     cfg=get_settings()
+    if cfg.free_demo:
+        root=(Path(__file__).parents[1]/'data'/'hosted').resolve()
+        path=(root/key).resolve()
+        if not path.is_relative_to(root):raise ValueError('Invalid historical cache key')
+        if path.is_file():return path.read_bytes()
+    if cfg.ARCHIVE_STORAGE=='database':return artifacts.read_key(key)
     if cfg.ARCHIVE_STORAGE=='r2':
         from botocore.exceptions import ClientError
         try:return artifacts.client().get_object(Bucket=cfg.R2_BUCKET,Key=key)['Body'].read()
@@ -75,6 +81,7 @@ def definitions():
 
 
 def catalogue():
+    if get_settings().free_demo:return json.loads(read_key('historical/catalogue.json'))
     rows=[]
     for row in definitions():
         row=dict(row,status='download_required',download_supported=True)

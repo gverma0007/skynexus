@@ -1,111 +1,73 @@
-# SkyNexus free sleeping-demo hosting plan
+# SkyNexus free hosting
 
-Prepared 27 November 2026. Selected priority: **a free academic demo that can sleep**. Application changes are pushed to `codex/research-workspace-earth-window`. This is a hosting plan; accounts, hosted secrets and deployment acceptance remain future work.
+Updated 27 November 2026. Selected layout: one sleeping **Render Free** web service and **Neon Free** PostgreSQL/PostGIS in Singapore. The root Dockerfile serves React and FastAPI together on one HTTPS origin. Deployment status and the public URL are recorded after acceptance below.
 
-## Recommendation
+## Free profile
 
-Use **one Render Free web service** for React and FastAPI together, backed by **Neon Free PostgreSQL/PostGIS**. Use a private Neon Object Storage bucket for historical cases, evaluations and evidence, after validating its S3 compatibility with this application. Start on Render's supplied HTTPS subdomain: no domain purchase, and login cookies/event streams share one origin.
+`HOSTING_PROFILE=free_demo` enables the bounded public research demo:
 
-The repository has Vercel preview checks and `/api` rewrites to `skynexus.onrender.com`. A successful preview establishes frontend deployment, not backend readiness. Keep the preview for UI review; use the Render origin for initial full-system acceptance. Do not change existing cloud projects during planning.
+- Eight real historical cases, their native-cadence replay, and cached chronological anomaly/forecast/advance-warning evaluations.
+- Six separately labelled synthetic fixtures and a cached synthetic benchmark.
+- Direct demo entry, optional provisioned password login, the full interface and all globe/window controls.
+- Session-private evidence ZIPs stored in PostgreSQL, with checksums, deduplication, an 8 MiB object limit and a 64 MiB total byte limit. Quota checks are serialized in the database. Old objects with no active owning session are eligible for cleanup after eight hours when another export is written.
+- One export at a time per API process; unsupported queued jobs, new archive downloads and observed-series model fitting return an explicit availability response.
+- Polling and SSE stop when a tab is hidden or idle. Continuous event subscriptions and source collection are disabled in the sleeping profile. Sessions and exports survive application restarts.
 
-| Component | Free-demo role | Limits and consequence |
-| --- | --- | --- |
-| Render Free web | Root Dockerfile builds/serves React + FastAPI | 512 MB RAM, 0.1 CPU. One API process; no separate continuous collector or report worker. Capacity must be measured. |
-| Neon Free Postgres | Sessions, regions, source state and bounded demonstration records | Currently 1 GB storage and 100 CU-hours/project/month. Scales to zero when inactive; use small DB pools. |
-| Neon Object Storage | Durable historical data, evaluation caches and evidence | Currently 5 GB/project. Verify private access, region, signing and application adapter. |
-| Render subdomain/TLS | Public demo URL | Set exact origin and secure cookies; no purchased domain needed. |
-| Local Docker | Full experiments and continuous collection during presentations | Existing six-service architecture; keep hosted capability labels distinct. |
+The checked-in `backend/app/data/hosted` release contains only attributed public datasets, cached evaluations, license material and generated fixtures. Its manifest is verified at startup, and each historical case verifies its own canonical hash. It is rebuilt offline with `python -m app.prepare_hosted_data`; large raw upstream archives are not downloaded by visitors.
 
-Sources: [Render compute](https://render.com/docs/compute-plans), [Neon Free pricing](https://neon.com/pricing), [Neon PostGIS](https://neon.com/docs/extensions/postgis), and [Neon Object Storage](https://neon.com/docs/storage/overview). Object storage is region-limited; Singapore is currently listed. Confirm matching account availability and latency before choosing regions.
+Small exports use the existing Neon database so this first deployment needs **no object-storage key, Redis account or background worker**. `ARCHIVE_STORAGE=local` and `r2` remain available to full local/always-on deployments. Public cached studies are not live acquisition; event-window proxy labels and retrospective warning limitations remain visible in the interface and exports.
 
-```mermaid
-flowchart LR
-    Browser -->|HTTPS: UI, login, API, replay| Web[Render Free: React and FastAPI]
-    Web <--> DB[(Neon Free PostGIS)]
-    Web <--> Objects[Private Neon object storage]
-    Prepared[Offline dataset preparation and evaluation] --> Objects
-    Web -.->|Optional bounded refresh while awake| Feeds[Selected public feeds]
-```
+## Accounts and cost
 
-**Target cost: $0 within free allowances.** Select Free plans, avoid automatic paid upgrades and verify spending controls. Track compute, DB/object storage, bandwidth and build usage. Reaching a limit should pause optional work instead of silently enabling billing. These allowances are not an SLA.
+Target: **$0 within free allowances**, using the supplied Render subdomain and TLS. Neon was provisioned through the existing Vercel Marketplace integration on its explicit `free_v3` plan; a Vercel-managed Neon organization cannot create projects directly through the Neon project API.
 
-## What sleep means
+[Render Free](https://render.com/docs/free) sleeps after 15 minutes without inbound traffic, wakes on a subsequent request, and loses local file changes on sleep/restart. Its free Postgres expires after 30 days, so this deployment uses Neon instead. Render's free compute is [512 MB RAM and 0.1 CPU](https://render.com/docs/compute-plans). [Neon Free](https://neon.com/pricing) currently includes 1 GB DB storage and 100 CU-hours per project/month. Quotas and availability can change; confirm the account's current plan and controls before adding services.
 
-Render documents [15-minute idle sleep, roughly one-minute wake-up, ephemeral files and 750 shared free instance-hours/month](https://render.com/docs/free). It has no Free background-worker option; Free Postgres expires after 30 days. Use Neon for durable DB history instead of the expiring database. High outbound traffic can also cause suspension, so collection/downloads must be bounded.
+No always-on acquisition, unattended alerts or background report execution is claimed while the app sleeps. Do not add keep-alive pings. Use the full Docker stack for live-stream presentations and scientific-file/model experiments. Optional paid upgrades are documented in [HOSTING_ALWAYS_ON.md](HOSTING_ALWAYS_ON.md).
 
-No collector or report process runs while the application sleeps. Show last observation times, acquisition gaps and whether a screen is historical replay or recent public data. Historical animation uses real measurements but is not current live acquisition. Do not use keep-alive pings to defeat sleeping behavior.
+## Configuration
 
-Stop polling/SSE when the page is hidden, paused or idle. The current SSE route polls the DB, which can keep Neon compute active while a tab remains open. A sleeping service cannot guarantee unattended advance warning or continuous maritime coverage; use local Docker for those demonstrations until an always-on deployment is chosen.
+| Variable | Hosted setting |
+| --- | --- |
+| `DATABASE_URL` | Neon pooled TLS runtime URL; stored only in Render environment settings. |
+| Direct database URL | Used from a protected operator environment for migrations and backups; never committed. |
+| `HOSTING_PROFILE` | `free_demo` |
+| `STARTUP_PREPARE` | `false` after one-time preparation. Cold starts launch Uvicorn directly. |
+| `ARCHIVE_STORAGE` | `database` |
+| `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | `2` / `1` |
+| `ENV` / `DATA_MODE` / `LIVE_INGEST` | `production` / `live` / `0` |
+| `PUBLIC_ORIGIN` | Exact public Render HTTPS origin. |
+| `COOKIE_SECURE` / `DEMO_DIRECT_LOGIN` | `true` / `true` |
+| `DEMO_EMAIL` / `DEMO_PASSWORD_HASH` | Optional existing provisioned demo credentials; keep the hash private. |
+| `ARCHIVE_MAX_BYTES` / `ARCHIVE_MAX_OBJECT_BYTES` | Defaults: 67108864 / 8388608. |
 
-## Public-demo scope
+Historical replay and cached evaluations require no aviation, weather, maritime or AI provider keys. The browser never receives DB credentials. Preserve `.env` and `.env.*` exclusions and use Render's secret environment settings.
 
-| Capability | First free release | Boundary |
-| --- | --- | --- |
-| Landing, direct login, dashboard, globe/window controls | Include | Add wake-up loading/retry and navigation recovery. |
-| Eight real historical cases | Preload verified data and browser replay | Persist outside the sleeping instance; preserve provenance, missing values and cadence. |
-| Detection and advance-warning evaluation | Cached reproducible results/methodology | Compute offline; retain dataset hash, method version and label limitations. |
-| Reports/evidence | Cached study exports and measured bounded synchronous reports | Enforce session ownership and checksum downloads. Do not queue jobs with no worker. |
-| Recent keyless signals | Optional small refresh while an evaluator is active | Needs bounded refresh controls and actual freshness labels first. |
-| AIS WebSocket, all-source ingestion and RQ | Local Docker demonstration | Unattended operation needs an always-on process. |
-| Scientific uploads, large imports and model refits | Local demonstration initially | Disable resource-heavy public operations until measured memory/runtime budgets support them. |
+`render.free.yaml` describes the single-service layout. The older `render.yaml` is the optional paid multi-service layout; do not use it for the free release.
 
-The SSE route already has a DB outbox recovery path; queued reports require Redis/RQ. The first free profile should explicitly use DB event delivery and synchronous/cached report paths. A Redis account alone provides no worker execution. Capability controls and the queue-free profile are **planned changes, not currently implemented hosting settings**.
+## Release procedure
 
-## Implementation order
+1. Run the backend tests against an isolated PostGIS database and build the frontend. GitHub Actions performs both on pushes and pull requests.
+2. Verify the packaged data manifest and build the root Docker image. Smoke-test the image at the free CPU/RAM budget, including the largest case and evidence exports.
+3. Prepare a new demo DB with the **direct** connection and `python -m app.prepare_database` from `backend`. This enables PostGIS/pgcrypto, migrates and seeds only attributed reference data. It does not copy local sessions, private files or live-looking synthetic observations.
+4. Deploy the pinned GitHub branch/commit to one Render Free Docker web service. Set the runtime environment above. Keep startup preparation disabled after the controlled migration succeeds.
+5. Check `/api/health` for process liveness and `/api/ready` for the required DB tables. Use `/api/health` for regular host probes so probes do not keep the database awake unnecessarily.
+6. Verify HTTPS, secure login cookies, all eight cases/evaluations, session-owned downloads, anonymous rejection and Earth controls. Restart the service and re-download a previously created export with the same session cookie.
+7. Close test clients, allow natural sleep and reopen the app. Record actual wake-up behavior and quota use. Do not claim a measured natural sleep test based only on a forced restart.
 
-### 1. Build and test the free profile
+## Backup and recovery
 
-- Add an explicit deployment capability profile. Preserve local Docker's full features; disable unsupported queued jobs, large uploads/refits and continuous collectors on the public demo. Explain unsupported actions rather than leaving jobs queued.
-- Add idle handling, cold-start loading/retry and truthful source freshness. Add rate-limited on-demand keyless refresh after the read/replay experience is stable.
-- Run one Uvicorn worker. Measure startup, login, case catalogue, longest replay and bounded exports under **512 MB and 0.1 CPU**. Use cached evaluations, lazy imports and offline preparation. If the measured API exceeds these limits, release a static read-only showcase with precomputed data and keep the full demo local; do not claim the full stack fits.
-- Prepare all eight historical cases/evaluations offline and upload only approved study artifacts. Exclude personal documents, `.env`, development sessions and private generated reports.
-- Extend CI beyond dependency installation/`compileall`: backend tests with PostGIS, frontend build and a resource-constrained demo smoke check. Current local baseline: 85 passing backend tests and a passing frontend production build.
+The root deployment image includes PostgreSQL 18 client tools to match the provisioned Neon PostgreSQL 18 database. The local backend image retains the PostgreSQL 16 client by default for its local database.
 
-### 2. Adapt persistence and startup
+`python -m app.backup create PATH.zip` supports `ARCHIVE_STORAGE=database`: the DB dump includes export bytes and ownership metadata. Local mode also copies local artifact files; remote R2 mode still needs a separate bucket backup. Backups contain private sessions and must remain outside Git, with file permissions restricted and copies protected independently of the hosted project.
 
-- Create a separate Neon demo project/branch; enable `postgis` and `pgcrypto`. Use TLS, small DB pools, a direct migration connection and a tested pooled API connection.
-- Add provider-neutral S3 settings or a tested Neon adapter. The current client hardcodes `region_name='auto'` and R2 variable names; changing only the endpoint does not establish compatibility. Validate explicit region, path-style addressing, private access, put/get/delete and SHA-256 downloads. See [Neon S3 support](https://neon.com/docs/storage/s3-compatibility) and [credential mapping](https://neon.com/docs/storage/authentication).
-- Persist raw public response bytes, processed cases and evaluations outside Render's filesystem. Add application-side retention/quota cleanup; Neon documents that S3 lifecycle/versioning settings are not enforced. An object bucket is not an independent backup.
-- Run migrations/seeds once as a controlled release step. The current entrypoint repeats setup and can build demo data; add a lightweight idempotent cold-start path. Free Render lacks paid one-off-job/shell facilities, so run controlled migrations from CI or the operator's machine with a protected direct connection.
-- Add DB-aware readiness and sanitized startup errors. Check sessions and evidence after an actual sleep/restart; never log complete connection strings.
+Verify with `python -m app.backup verify PATH.zip`. Restore only into a fresh empty database with a compatible PostgreSQL client/server version, using `RESTORE_DATABASE_URL` and `python -m app.backup restore PATH.zip --artifacts-dir EMPTY_DIR`. The CLI refuses to overwrite an existing application database. Check migration revision, record counts, login and export checksums after restoration.
 
-### 3. Configure accounts and secrets
+Free hosted compute has no unattended backup worker. Take an independent backup before migrations and presentations; automate off-host backups separately if the demo becomes a maintained service. Neon instant-restore history is not an independent backup.
 
-Only **Render and Neon accounts** are needed for this initial layout. No provider/AI API keys are needed for historical replay. Use hosted environment settings; leave the root `.env` ignored by Git.
+## Acceptance record
 
-| Configuration | Source/action | Current support |
-| --- | --- | --- |
-| `DATABASE_URL` | Neon TLS runtime connection string | Existing variable. |
-| Separate migration connection | Neon direct connection | Add release-job configuration. |
-| Private bucket, endpoint, region, access key ID and secret | Neon Object Storage branch-scoped credential | Adapter still needs implementation; do not reuse R2's `auto` region blindly. |
-| `PUBLIC_ORIGIN` | Exact Render HTTPS URL | Existing variable. |
-| `COOKIE_SECURE=true` | Hosted HTTPS | Existing variable. |
-| `DEMO_DIRECT_LOGIN=true` | Public academic demo | Existing variable; password login can also be configured. |
-| `ENV=production`, `DATA_MODE=live`, `LIVE_INGEST=0` | Hosted profile | Existing variables; this starts no collector. Label historical replay explicitly. |
-| Capability/idle/queue controls | New free profile | Planned; no invented environment flags are currently supported. |
-
-Neon maps `token_id` to the S3 access key ID and `s3_secret_access_key` to its secret. Keep the bucket private and credentials server-side. After the queue-free profile is implemented, the first release needs no Redis, R2, Upstash or AI subscription. Deployment API tokens are optional with manual account connection; request only those required by selected automation.
-
-### 4. Publish and accept
-
-1. Complete the profile, persistence and startup work; pass CI and constrained checks.
-2. Create/connect free accounts only when deployment is requested. Confirm quotas/regions; provision no paid workers from the existing `render.yaml`.
-3. Seed approved data, migrate and build from the pinned GitHub commit. Deploy one Free web service with the root Dockerfile and exact HTTPS origin.
-4. Verify login, all globe appearances and window controls on desktop/mobile; all eight cases, cached metrics, attribution and allowed reports. Test anonymous rejection and session-scoped artifacts.
-5. Close clients, allow real sleep, then reopen. Check loading/retry, DB reconnect, sessions, cases and artifact checksums. No local-only file may be required.
-6. Run evaluator-sized concurrency, record peak memory/latency and inspect quota use. Disabled operations must explain availability and not enqueue work.
-7. Record the URL, commit, migration revision and measured limits. Save independent DB/object backups and test restore. Keep a local presentation fallback.
-
-## Optional always-on upgrade
-
-For unattended streams and queued processing, use the [always-on plan](HOSTING_ALWAYS_ON.md). Starting estimates: DigitalOcean 4 GiB VM at $24/month plus 30% for daily VM backups; managed Render layout at $104/month compute before storage/other usage. These are optional paid upgrades, not the selected plan. Sources: [DigitalOcean compute](https://www.digitalocean.com/pricing/droplets), [backups](https://docs.digitalocean.com/products/backups/details/pricing/) and [Render pricing](https://render.com/pricing).
-
-## Completion checklist
-
-- [ ] Free capability profile and idle behavior implemented.
-- [ ] Neon adapter and durable case/evaluation caches verified.
-- [ ] Cold start, reports and replay fit the measured free resource budget.
-- [ ] Free accounts, origin and hosted secrets configured when requested.
-- [ ] Sleep/wake, login, ownership and evidence checks accepted.
-- [ ] Quota controls, independent restore and local fallback verified.
-- [ ] Public URL, pinned release and measured limitations recorded.
+- Fresh PostgreSQL 16/PostGIS migrations passed; Neon PostgreSQL 18 preparation passed.
+- Backend: 88 tests passed; frontend production build passed.
+- Constrained-image, hosted deployment and restart verification: recorded after completion.
+- Natural sleep/wake: requires a full idle interval and is recorded separately from restart checks.

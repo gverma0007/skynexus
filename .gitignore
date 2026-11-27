@@ -13,6 +13,8 @@ dist/
 
 # Env & secrets
 .env
+.env.*
+!.env.example
 .ai/
 ai/
 .config/

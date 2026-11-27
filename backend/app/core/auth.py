@@ -60,7 +60,9 @@ def issue_session(request,response):
 
 
 @router.get('/options')
-def options():return {'direct_demo_login':get_settings().DEMO_DIRECT_LOGIN}
+def options():
+    from app.core.capabilities import capabilities
+    return {'direct_demo_login':get_settings().DEMO_DIRECT_LOGIN, 'capabilities':capabilities()}
 
 
 @router.post('/demo')

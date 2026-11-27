@@ -34,6 +34,8 @@ Open-Meteo, USGS, GDACS, GDELT, NOAA space weather, IODA, CelesTrak and OurAirpo
 
 Default `ARCHIVE_STORAGE=local` works without accounts. Docker shares a persistent `research_artifacts` volume between the services.
 
+The sleeping hosted demo uses `ARCHIVE_STORAGE=database`: small session-private exports persist in PostgreSQL, and immutable historical cases/evaluations ship with the image. It needs no R2 credentials. See [HOSTING.md](HOSTING.md) for the free profile, size limits and release procedure.
+
 For private Cloudflare R2/S3-compatible storage configure **all** of:
 
 ```

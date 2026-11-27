@@ -1,0 +1,34 @@
+# One sleeping free web service. Supply an external Neon connection string.
+services:
+  - type: web
+    name: skynexus-demo
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: codex/research-workspace-earth-window
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: HOSTING_PROFILE
+        value: free_demo
+      - key: STARTUP_PREPARE
+        value: "false"
+      - key: ARCHIVE_STORAGE
+        value: database
+      - key: DB_POOL_SIZE
+        value: "2"
+      - key: DB_MAX_OVERFLOW
+        value: "1"
+      - key: ENV
+        value: production
+      - key: DATA_MODE
+        value: live
+      - key: LIVE_INGEST
+        value: "0"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: DEMO_DIRECT_LOGIN
+        value: "true"
+      - key: PUBLIC_ORIGIN
+        sync: false

@@ -48,6 +48,8 @@ def experiments(request:Request,db:Session=Depends(get_db)):
 
 @router.get('/stream')
 def stream(request:Request):
+    if __import__('app.core.config',fromlist=['get_settings']).get_settings().free_demo:
+        raise HTTPException(409,'Continuous event delivery is paused on the sleeping demo. Use historical replay or refresh the current view.')
     try: cursor=int(request.headers.get('last-event-id') or request.query_params.get('cursor','0'))
     except ValueError: raise HTTPException(422,'Invalid stream cursor')
     async def events():

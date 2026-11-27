@@ -34,6 +34,9 @@ async def lifespan(_: FastAPI):
     settings = get_settings()
     logger.info("SkyNexus starting: env=%s data_mode=%s live_ingest=%s",
                 settings.ENV, settings.DATA_MODE, settings.LIVE_INGEST)
+    if settings.free_demo:
+        from app.prepare_hosted_data import verify
+        verify()
     yield
 
 
@@ -43,17 +46,39 @@ app.include_router(research_router, prefix="/api")
 app.include_router(base_router, prefix="/api")
 app.include_router(extensions_router, prefix="/api")
 
+_export_lock = __import__('asyncio').Lock()
+
+from app.services.artifacts import StorageLimitError
+
+
+@app.exception_handler(StorageLimitError)
+async def storage_limit(request, error):
+    return JSONResponse({'detail':str(error)},status_code=413)
+
 
 @app.get("/api/health")
 def health_check():
     return {"status": "ok"}
 
 
+@app.get('/api/ready')
+def readiness():
+    from sqlalchemy import text
+    from app.core.db import engine
+    try:
+        with engine.connect() as connection:
+            connection.execute(text('SELECT 1 FROM research_sessions LIMIT 0'))
+            connection.execute(text('SELECT 1 FROM artifact_objects LIMIT 0'))
+        return {'status':'ready','profile':get_settings().HOSTING_PROFILE}
+    except Exception:
+        return JSONResponse({'status':'unavailable'},status_code=503)
+
+
 @app.middleware("http")
 async def authenticate(request, call_next):
     path = request.url.path
     public_auth=("/api/auth/login","/api/auth/demo","/api/auth/options")
-    if path.startswith("/api/") and path not in ("/api/health",*public_auth):
+    if path.startswith("/api/") and path not in ("/api/health",'/api/ready',*public_auth):
         user = await __import__('asyncio').to_thread(session_for, request)
         if not user:
             return JSONResponse({"detail":"Sign in required"}, status_code=401)
@@ -65,6 +90,9 @@ async def authenticate(request, call_next):
             return JSONResponse({"detail":"Invalid request origin"}, status_code=403)
         if path in ("/api/system/mode", "/api/ingest/live") and request.method == "POST":
             return JSONResponse({"detail":"Collection settings are administrative; use viewer dataset controls."},status_code=403)
+        from app.core.capabilities import restricted
+        if restricted(path,request.method):
+            return JSONResponse({'detail':'This action needs the full local workspace. The hosted demo provides prepared historical replay and cached evaluations.'},status_code=409)
     elif path in public_auth and request.method=='POST' and not valid_origin(request):
         return JSONResponse({"detail":"Invalid request origin"},status_code=403)
     mode = request.query_params.get('data_mode')
@@ -77,7 +105,12 @@ async def authenticate(request, call_next):
         request_mode.reset(mode_token)
         return JSONResponse({'detail':'as_of requires an ISO timestamp with timezone'}, status_code=422)
     time_token=request_as_of.set(asof)
-    try: return await call_next(request)
+    try:
+        if get_settings().free_demo and request.method=='POST' and path not in public_auth and path!='/api/auth/logout':
+            if _export_lock.locked():return JSONResponse({'detail':'Another demo export is running. Please retry shortly.'},status_code=429,headers={'Retry-After':'5'})
+            async with _export_lock:
+                return await call_next(request)
+        return await call_next(request)
     finally:
         request_mode.reset(mode_token)
         request_as_of.reset(time_token)

@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from contextvars import ContextVar
+from typing import Literal
 request_mode = ContextVar("request_mode", default=None)
 request_as_of = ContextVar("request_as_of", default=None)
 
@@ -20,6 +21,12 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "postgresql://user:password@localhost:5432/skynexus"
     ENV: str = "development"
+    HOSTING_PROFILE: Literal['full', 'free_demo'] = 'full'
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 5
+    STARTUP_PREPARE: bool = True
+    ARCHIVE_MAX_BYTES: int = 64 * 1024 * 1024
+    ARCHIVE_MAX_OBJECT_BYTES: int = 8 * 1024 * 1024
 
     # "live" pulls real public feeds; "demo" generates a synthetic 8-day world.
     DATA_MODE: str = "live"
@@ -47,6 +54,10 @@ class Settings(BaseSettings):
     R2_SECRET_ACCESS_KEY: str = ""
     R2_BUCKET: str = ""
     ARCHIVE_STORAGE: str = "local"
+
+    @property
+    def free_demo(self) -> bool:
+        return self.HOSTING_PROFILE == 'free_demo'
 
     # OpenSky Network OAuth2 credentials (bypasses datacenter IP rate limits on Render/AWS)
     OPENSKY_CLIENT_ID: str = ""

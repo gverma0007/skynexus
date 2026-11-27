@@ -1,10 +1,6 @@
 """Chronological historical evaluation with purged onset targets and baselines."""
 import math
 import numpy as np
-from sklearn.ensemble import IsolationForest,GradientBoostingRegressor
-from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
 from app.services.historical import stamp,iso
 METHOD_VERSION='historical-chronological-v3'
 
@@ -89,6 +85,7 @@ def prediction_features(y,origins,step,previous,period,median):
 
 
 def numeric_forecast(y,train_end,test_start,cadence,period,median):
+    from sklearn.ensemble import GradientBoostingRegressor
     horizon=max(1,math.ceil(6/cadence))
     train=[i for i in range(max(2,period),train_end) if np.isfinite(y[i])]
     if len(train)<24:return {'status':'insufficient_data','forecast_metrics':{},'by_horizon':{},'message':'At least 24 valid lagged training targets are required.'}
@@ -126,6 +123,9 @@ def numeric_forecast(y,train_end,test_start,cadence,period,median):
 
 
 def warning(data,X,quality,labels,train_end,test_start,cadence):
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
     horizon=max(1,math.ceil(6/cadence));n=len(labels)
     result={'status':'insufficient_labels','target':'Annotated anomaly-window onset in the next '+str(round(horizon*cadence,6))+' hours, conditional on being outside a labelled window.',
             'horizon_hours':round(horizon*cadence,6),'message':'Training and calibration must each contain normal and pre-onset examples. A single heldout incident cannot train a validated warning classifier.'}
@@ -172,6 +172,7 @@ def warning(data,X,quality,labels,train_end,test_start,cadence):
 
 
 def evaluate(data):
+    from sklearn.ensemble import IsolationForest
     from importlib.metadata import version
     import sys
     cadence=float(data['cadence_hours']);times=[stamp(t) for t in data['times']];n=len(times)

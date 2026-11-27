@@ -170,7 +170,7 @@ def direct_client(monkeypatch,tmp_path):
 def test_direct_login_is_flagged_origin_checked_and_revocable(direct_client,monkeypatch):
     from app.core.config import base_settings
     client=direct_client
-    assert client.get('/api/auth/options').json()=={'direct_demo_login':True}
+    assert client.get('/api/auth/options').json()['direct_demo_login'] is True
     assert client.get('/api/cases').status_code==401
     assert client.post('/api/auth/demo',headers={'origin':'https://unrelated.example'}).status_code==403
     response=client.post('/api/auth/demo');assert response.status_code==200 and 'HttpOnly' in response.headers['set-cookie']

@@ -9,5 +9,7 @@ task_pg_fingerprint=$(gpg --show-keys --with-colons /usr/share/postgresql-common
 . /etc/os-release
 printf 'Types: deb\nURIs: https://apt.postgresql.org/pub/repos/apt\nSuites: %s-pgdg\nComponents: main\nSigned-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc\n' "$VERSION_CODENAME" > /etc/apt/sources.list.d/pgdg.sources
 apt-get update
-apt-get install -y --no-install-recommends postgresql-client-16
+task_pg_client_major=${PGCLIENT_MAJOR:-16}
+case "$task_pg_client_major" in 16|17|18) ;; *) exit 1 ;; esac
+apt-get install -y --no-install-recommends "postgresql-client-$task_pg_client_major"
 rm -rf /var/lib/apt/lists/*

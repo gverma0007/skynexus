@@ -43,18 +43,18 @@ def verify(path):
 def create(path):
     from app.services.artifacts import bundle
     cfg=get_settings()
-    if cfg.ARCHIVE_STORAGE!='local':raise ValueError('This local backup command requires ARCHIVE_STORAGE=local; back up the object bucket separately')
+    if cfg.ARCHIVE_STORAGE not in ('local','database'):raise ValueError('Back up the remote object bucket separately; this command supports local or database artifacts')
     with tempfile.TemporaryDirectory() as tmp:
         database=Path(tmp)/'database.dump'
         env=connection_env(cfg.DATABASE_URL)
         subprocess.run(['pg_dump','--format=custom','--file',str(database)],env=env,check=True,capture_output=True)
         files={'database.dump':database.read_bytes()}
         root=Path(cfg.ARTIFACT_DIR)
-        if root.exists():
+        if cfg.ARCHIVE_STORAGE=='local' and root.exists():
             for item in root.rglob('*'):
                 if item.is_file() and not item.is_symlink():files['artifacts/'+str(item.relative_to(root))]=item.read_bytes()
         path.parent.mkdir(parents=True,exist_ok=True)
-        path.write_bytes(bundle(files,{'schema_version':1,'storage':'local','contains_private_sessions':True}))
+        path.write_bytes(bundle(files,{'schema_version':1,'storage':cfg.ARCHIVE_STORAGE,'contains_private_sessions':True}))
         path.chmod(0o600)
     verify(path)
 

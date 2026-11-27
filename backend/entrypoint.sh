@@ -2,6 +2,11 @@
 # Prepare the database, then start the API.
 set -e
 
+if [ "${STARTUP_PREPARE:-true}" = "false" ]; then
+  echo "[skynexus] starting prepared application"
+  exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" --proxy-headers
+fi
+
 echo "[skynexus] waiting for the database..."
 python - <<'PY'
 import os, sys, time
@@ -16,7 +21,7 @@ for attempt in range(60):
         print("[skynexus] database connection successful!", flush=True)
         sys.exit(0)
     except Exception as exc:
-        print(f"  database not ready ({exc.__class__.__name__}: {exc}), retrying...", flush=True)
+        print(f"  database not ready ({exc.__class__.__name__}), retrying...", flush=True)
         time.sleep(2)
 sys.exit("database never became available")
 PY

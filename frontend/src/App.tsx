@@ -4,6 +4,7 @@ import { usePoll } from './lib/usePoll';
 import { go, href, PAGES, useRoute } from './lib/router';
 import type { Page } from './lib/router';
 import { useViewer, viewer } from './lib/viewer';
+import { useActivity } from './lib/activity';
 import Icon from './components/Icon';
 import Globe from './globe/Globe';
 import Overview from './pages/Overview';
@@ -21,22 +22,40 @@ export default function App() {
   const [checking, setChecking] = useState(true);
   const [expired, setExpired] = useState(false);
   const [directDemo, setDirectDemo] = useState(false);
+  const [bootError, setBootError] = useState('');
   useEffect(() => {
     const onPath = () => setPath(window.location.pathname);
     const unauthorized = () => { setUser(null); setExpired(true); navigate('/login'); };
     window.addEventListener('popstate', onPath);
     window.addEventListener('skynexus:navigate', onPath);
     window.addEventListener('skynexus:unauthorized', unauthorized);
-    api.me().then(setUser).catch(() => setUser(null)).finally(() => setChecking(false));
-    api.authOptions().then((options) => setDirectDemo(options.direct_demo_login)).catch(() => setDirectDemo(false));
-    return () => { window.removeEventListener('popstate', onPath); window.removeEventListener('skynexus:navigate', onPath); window.removeEventListener('skynexus:unauthorized', unauthorized); };
+    let alive = true;
+    const boot = async () => {
+      for (let attempt = 0; attempt < 5 && alive; attempt++) {
+        try {
+          const options = await api.authOptions();
+          if (!alive) return;
+          viewer.configure(options.capabilities?.profile ?? 'full');
+          setDirectDemo(options.direct_demo_login);
+          const account = await api.me().catch(() => null);
+          if (!alive) return;
+          setUser(account); setChecking(false); return;
+        } catch {
+          if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
+      }
+      if (alive) { setBootError('SkyNexus is waking up or temporarily unavailable. Please try again shortly.'); setChecking(false); }
+    };
+    void boot();
+    return () => { alive = false; window.removeEventListener('popstate', onPath); window.removeEventListener('skynexus:navigate', onPath); window.removeEventListener('skynexus:unauthorized', unauthorized); };
   }, []);
   const inApp = path === '/app' || path.startsWith('/app/') || window.location.hash.startsWith('#/');
   if (path === '/methodology') return <div className="public-page"><PublicHeader /><Methodology /><PublicFooter /></div>;
-  const openWorkspace = (u: User) => { clearApiCache(); setUser(u); setExpired(false); navigate('/app'); };
+  const openWorkspace = (u: User) => { clearApiCache(); setUser(u); setExpired(false); navigate('/app'); if (viewer.get().profile === 'free_demo') go('replay'); };
+  if (bootError) return <div className="boot"><Logo /><p role="alert">{bootError}</p><button className="btn primary" onClick={() => window.location.reload()}>Retry opening SkyNexus</button></div>;
   if (path === '/login' || (inApp && !user && !checking)) return <Login directDemo={directDemo} expired={expired} onLogin={openWorkspace} />;
   if (!inApp) return <Landing directDemo={directDemo} onLogin={openWorkspace} />;
-  if (checking) return <div className="boot"><Logo /><span>Opening your workspace…</span></div>;
+  if (checking) return <div className="boot"><Logo /><span>Opening your workspace… A sleeping demo may take about a minute to wake up.</span></div>;
   return user ? <Workspace user={user} onLogout={async () => { await api.logout(); clearApiCache(); setUser(null); navigate('/'); }} /> : null;
 }
 
@@ -96,6 +115,8 @@ const NAV: { label: string; items: { id: Page; label: string; icon: string }[] }
 function Workspace({ user, onLogout }: { user: User; onLogout: () => Promise<void> }) {
   const route = useRoute();
   const state = useViewer();
+  const freeDemo = state.profile === 'free_demo';
+  const active = useActivity(freeDemo);
   const regions = usePoll(api.regions, 60_000);
   const outlines = usePoll(api.outlines, 0);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -114,7 +135,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => Promise<voi
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, []);
   useEffect(() => {
-    if (!state.realtime || state.dataset === 'historical') return;
+    if (!state.realtime || state.dataset === 'historical' || !active || freeDemo) return;
     let alive = true;
     let stream: EventSource | null = null;
     let retry: ReturnType<typeof setTimeout> | undefined;
@@ -133,7 +154,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => Promise<voi
     };
     void connect();
     return () => { alive = false; stream?.close(); if (retry) clearTimeout(retry); };
-  }, [state.realtime, state.dataset]);
+  }, [state.realtime, state.dataset, active, freeDemo]);
   let body;
   switch (route.page) {
     case 'regions': body = <Regions regions={regions.data} error={regions.error} />; break;
@@ -157,10 +178,11 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => Promise<voi
       <nav aria-label="Main navigation">{NAV.map((group) => <div className="nav-group" key={group.label}><span>{group.label}</span>{group.items.map((item) => <a key={item.id} href={href(item.id)} className={route.page === item.id ? 'selected' : ''} aria-current={route.page === item.id ? 'page' : undefined}><Icon name={item.icon} />{item.label}{item.id === 'explore' && <span className="nav-new">4 views</span>}</a>)}</div>)}</nav>
       <div className="sidebar-bottom"><a href={href('methodology')}><Icon name="book" />Methodology</a><button onClick={() => onLogout().catch(() => setLogoutError('Could not sign out. Please retry.'))}><Icon name="logout" />Sign out</button>{logoutError && <span className="login-error">{logoutError}</span>}<div className="account"><span className="avatar">{user.email[0]?.toUpperCase() ?? 'D'}</span><div><b>Demo researcher</b><span>{user.email}</span></div><span className="account-dot" /></div></div>
     </aside>
-    <div className="workspace-content"><header className="workspace-header"><button className="mobile-menu" aria-label={mobileNav ? 'Close navigation' : 'Open navigation'} aria-expanded={mobileNav} onClick={() => setMobileNav(!mobileNav)}><Icon name="menu" /></button><div className="breadcrumbs"><Icon name={current?.icon ?? 'globe'} size={17} /><span>Workspace</span><span>/</span><b>{current?.label ?? PAGES.find((p) => p.id === route.page)?.label ?? 'Dashboard'}</b></div><div className={`connection connection-${state.connection}`}><span />{state.connection === 'receiving' ? 'Connected' : state.connection === 'paused' ? 'View paused' : state.connection === 'connecting' ? 'Connecting' : 'Reconnecting'}</div><span className="avatar small-avatar">{user.email[0]?.toUpperCase() ?? 'D'}</span></header>
-      <div className="context-bar"><div className="context-scope"><Icon name="globe" size={16} /><span>Global overview</span><span className="context-divider" />Selected regions in depth</div><div className="context-controls"><label className="dataset-control"><span className={`dataset-dot ${state.dataset}`} /><select aria-label="Dataset" value={state.dataset} onChange={(e) => { if (e.target.value === 'historical') go('replay'); else { clearApiCache(); viewer.setDataset(e.target.value as 'live' | 'demo'); } }}><option value="live">Live sources</option><option value="demo">Synthetic scenario</option><option value="historical">Historical replay</option></select></label><button className={`realtime-toggle ${state.realtime ? 'enabled' : ''}`} disabled={state.dataset === 'historical'} onClick={() => state.realtime ? viewer.pause() : viewer.resume()} aria-pressed={state.realtime}><span className="toggle-track"><i /></span>Realtime</button></div></div>
+    <div className="workspace-content"><header className="workspace-header"><button className="mobile-menu" aria-label={mobileNav ? 'Close navigation' : 'Open navigation'} aria-expanded={mobileNav} onClick={() => setMobileNav(!mobileNav)}><Icon name="menu" /></button><div className="breadcrumbs"><Icon name={current?.icon ?? 'globe'} size={17} /><span>Workspace</span><span>/</span><b>{current?.label ?? PAGES.find((p) => p.id === route.page)?.label ?? 'Dashboard'}</b></div><div className={`connection connection-${state.connection}`}><span />{!active ? 'View idle' : freeDemo ? 'Replay ready' : state.connection === 'receiving' ? 'Connected' : state.connection === 'paused' ? 'View paused' : state.connection === 'connecting' ? 'Connecting' : 'Reconnecting'}</div><span className="avatar small-avatar">{user.email[0]?.toUpperCase() ?? 'D'}</span></header>
+      <div className="context-bar"><div className="context-scope"><Icon name="globe" size={16} /><span>Global overview</span><span className="context-divider" />Selected regions in depth</div><div className="context-controls"><label className="dataset-control"><span className={`dataset-dot ${state.dataset}`} /><select aria-label="Dataset" value={state.dataset} onChange={(e) => { if (e.target.value === 'historical') go('replay'); else { clearApiCache(); viewer.setDataset(e.target.value as 'live' | 'demo'); } }}><option value="live">{freeDemo ? 'Stored sources' : 'Live sources'}</option><option value="demo">Synthetic scenario</option><option value="historical">Historical replay</option></select></label><button className={`realtime-toggle ${state.realtime ? 'enabled' : ''}`} disabled={state.dataset === 'historical' || freeDemo} title={freeDemo ? 'Continuous collection is available in the full workspace' : undefined} onClick={() => state.realtime ? viewer.pause() : viewer.resume()} aria-pressed={state.realtime}><span className="toggle-track"><i /></span>Realtime</button></div></div>
       {state.dataset === 'demo' && <div className="mode-banner synthetic"><Icon name="experiments" size={16} /><span>Synthetic scenario. Generated observations are for demonstration and are separate from live evidence.</span></div>}
-      {!state.realtime && <div className="mode-banner"><Icon name="pause" size={16} /><span>{state.dataset === 'historical' ? 'Historical view' : 'Your view is paused'}{state.asOf ? ` at ${new Date(state.asOf).toLocaleString()}` : ''}. Source collection continues.</span><button onClick={() => { clearApiCache(); viewer.setDataset('live'); }}>Return to latest <Icon name="arrow" size={14} /></button></div>}
+      {freeDemo && <div className="mode-banner"><Icon name="replay" size={16} /><span>Sleeping research demo · Eight real historical studies and cached evaluations. Continuous collection is paused.</span><button onClick={() => { clearApiCache(); viewer.refresh(); }}>Refresh view</button></div>}
+      {!state.realtime && !freeDemo && <div className="mode-banner"><Icon name="pause" size={16} /><span>{state.dataset === 'historical' ? 'Historical view' : 'Your view is paused'}{state.asOf ? ` at ${new Date(state.asOf).toLocaleString()}` : ''}. Source collection continues.</span><button onClick={() => { clearApiCache(); viewer.setDataset('live'); }}>Return to latest <Icon name="arrow" size={14} /></button></div>}
       <main id="main" className="workspace-main">{body}</main><footer className="workspace-footer"><span>SkyNexus Research</span><span>Statistical change and association. Correlation does not establish causation.</span></footer>
     </div>{searchOpen && <SearchDialog onClose={() => setSearchOpen(false)} />}</div>;
 }

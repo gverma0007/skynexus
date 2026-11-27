@@ -7,6 +7,7 @@ branch_labels=None
 depends_on=None
 
 def upgrade():
-    op.add_column('hourly_features',sa.Column('updated_at',sa.DateTime(timezone=True),nullable=False,server_default=sa.func.now()))
+    # Earlier revisions create tables from current ORM metadata on a fresh install.
+    op.execute('ALTER TABLE hourly_features ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now()')
 
 def downgrade():op.drop_column('hourly_features','updated_at')

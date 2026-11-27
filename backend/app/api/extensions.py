@@ -16,9 +16,10 @@ router=APIRouter()
 
 @router.get('/signals/{domain}/forecast')
 def domain_forecast(domain:str,source:str,metric:str,entity:str,horizon:int=Query(6,ge=1,le=24),db:Session=Depends(get_db)):
-    from app.services.forecasting import forecast
     now=request_as_of.get() or datetime.now(timezone.utc)
     base={'domain':domain,'source':source,'entity':entity,'metric':metric,'unit':None,'history':[],'points':[],'evaluation':None,'limitations':[]}
+    if get_settings().free_demo:return dict(base,status='insufficient_data',limitations=['Open a historical case to inspect prepared prediction results. Model fitting is available in the full local workspace.'])
+    from app.services.forecasting import forecast
     if get_settings().DATA_MODE=='demo':return dict(base,status='insufficient_data',limitations=['Select a live/imported numeric series; synthetic benchmarks are separate.'])
     rows=db.scalars(select(HourlyFeature).where(HourlyFeature.domain==domain,HourlyFeature.source==source,HourlyFeature.entity==entity,HourlyFeature.metric==metric,HourlyFeature.timestamp<now.replace(minute=0,second=0,microsecond=0),HourlyFeature.updated_at<=now).order_by(HourlyFeature.timestamp.desc()).limit(720)).all()[::-1]
     base['history']=[{'time':r.timestamp.isoformat(),'value':r.value_sum/r.sample_count} for r in rows]
@@ -40,9 +41,14 @@ def cases():
 def case_data(case_id:str):
     from app.services.historical import read_case,read_key
     from app.services.historical_evaluation import METHOD_VERSION
-    from app.services.benchmark import dataset
-    match=next((row for row in dataset() if 'synthetic-'+row['id']==case_id),None)
-    if match is not None:return match
+    if case_id.startswith('synthetic-'):
+        if get_settings().free_demo:
+            fixtures=json.loads(read_key('synthetic/dataset.json'))
+        else:
+            from app.services.benchmark import dataset
+            fixtures=dataset()
+        match=next((row for row in fixtures if 'synthetic-'+row['id']==case_id),None)
+        if match is not None:return match
     try:data=read_case(case_id)
     except (FileNotFoundError,KeyError):raise HTTPException(404,'Download this public historical study before replaying it')
     except ValueError:raise HTTPException(409,'Historical dataset integrity check failed')
@@ -75,9 +81,10 @@ def evaluate_case(case_id:str,request:Request,db:Session=Depends(get_db)):
         result=json.loads(read_key(f'historical/evaluations/{case_id}.json'))
     except (FileNotFoundError,json.JSONDecodeError):result=None
     if not isinstance(result,dict) or result.get('dataset_hash')!=data['dataset_hash'] or result.get('method_version')!=METHOD_VERSION:
+        if get_settings().free_demo:raise HTTPException(409,'This evaluation needs offline preparation before it is available in the hosted demo')
         try:result=evaluate(data)
         except ValueError as e:raise HTTPException(422,str(e))
-    artifacts.write_bytes(f'historical/evaluations/{case_id}.json',encoded(result))
+    if not get_settings().free_demo:artifacts.write_bytes(f'historical/evaluations/{case_id}.json',encoded(result))
     files={'observations-and-labels.json':encoded(data),'evaluation.json':encoded(result),'report.md':report_markdown(data,result)}
     for source in data['provenance']:
         if source.get('name')=='NAB license notice':files['NAB-LICENSE.txt']=read_key(source['archive_key'])
@@ -87,12 +94,17 @@ def evaluate_case(case_id:str,request:Request,db:Session=Depends(get_db)):
 
 @router.post('/experiments/benchmark',status_code=201)
 def benchmark(request:Request,db:Session=Depends(get_db)):
-    from app.services.benchmark import run
-    result=run(42)
+    if get_settings().free_demo:
+        from app.services.historical import read_key
+        fixtures=json.loads(read_key('synthetic/dataset.json'))
+        result=json.loads(read_key('synthetic/evaluation.json'))
+    else:
+        from app.services.benchmark import run,dataset
+        result=run(42)
+        fixtures=dataset(42)
     result.update(id=str(uuid.uuid4()),created_at=datetime.now(timezone.utc).isoformat(),source='synthetic-benchmark',metric='labelled_operational_disruption')
-    from app.services.benchmark import dataset
     contents={'result.json':json.dumps(result,sort_keys=True,indent=2).encode(),
-              'labelled_inputs.json':json.dumps(dataset(42),sort_keys=True).encode()}
+              'labelled_inputs.json':json.dumps(fixtures,sort_keys=True).encode()}
     row=artifacts.save(db,request.state.user['session_id'],'synthetic-benchmark.zip',artifacts.bundle(contents,{'dataset_mode':'synthetic','seed':42}),'application/zip')
     result['artifacts']=[artifacts.describe(row)]
     db.add(Experiment(id=result['id'],session_hash=request.state.user['session_id'],result=result));db.commit()

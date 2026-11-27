@@ -390,7 +390,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(target, { ...init, credentials: 'include' });
   } catch {
-    throw new ApiError(0, 'Cannot reach the SkyNexus API. Check that the backend container is running.');
+    throw new ApiError(0, 'SkyNexus is waking up or temporarily unavailable. Please retry in a moment.');
   }
   if (!res.ok) {
     let detail = res.statusText;
@@ -419,7 +419,7 @@ const q = (params: Record<string, string | number | undefined | null>) => {
 
 export const api = {
   me: () => request<{ email: string; name?: string; role?: string }>('/auth/me'),
-  authOptions: () => request<{ direct_demo_login: boolean }>('/auth/options'),
+  authOptions: () => request<{ direct_demo_login: boolean; capabilities?: { profile: 'full' | 'free_demo' } }>('/auth/options'),
   enterDemo: () => request<{ email: string; role?: string }>('/auth/demo', { method: 'POST' }),
   login: (email: string, password: string) => request<{ email: string }>('/auth/login', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }),
