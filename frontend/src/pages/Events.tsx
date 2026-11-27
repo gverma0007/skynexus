@@ -33,7 +33,7 @@ export default function Events({ regions, outlines, tab }: { regions: Region[] |
 
   const exportCsv = () => {
     if (tab === 'quakes') {
-      downloadText(`skynexus-conflicts-${stamp()}.csv`, toCsv((events.data ?? []).map((e) => ({
+      downloadText(`skynexus-events-${stamp()}.csv`, toCsv((events.data ?? []).map((e) => ({
         time_utc: e.event_date, severity_level: e.magnitude, description: e.description, region: e.region_name,
         lat: e.lat, lon: e.lon, source: e.source,
       }))), 'text/csv');
@@ -49,14 +49,14 @@ export default function Events({ regions, outlines, tab }: { regions: Region[] |
     <div className="page">
       <div className="pagehead">
         <div>
-          <h1>Conflict & Security Events</h1>
-          <p>Conflict incidents and early warnings inside monitored regions, and anomaly alerts.</p>
+          <h1>Events & anomaly log</h1>
+          <p>Documented events and statistical changes within monitored regions.</p>
         </div>
         <button className="btn" onClick={exportCsv}>Export CSV</button>
       </div>
       <div className="toolbar">
         <div className="seg" role="tablist" aria-label="Event type">
-          <button role="tab" aria-selected={tab === 'quakes'} className={tab === 'quakes' ? 'on' : ''} onClick={() => go('events')}>Conflict & War Alerts</button>
+          <button role="tab" aria-selected={tab === 'quakes'} className={tab === 'quakes' ? 'on' : ''} onClick={() => go('events')}>Source events</button>
           <button role="tab" aria-selected={tab === 'anomalies'} className={tab === 'anomalies' ? 'on' : ''} onClick={() => go('events', 'anomalies')}>Anomaly log</button>
         </div>
         <label className="field">
@@ -84,11 +84,11 @@ export default function Events({ regions, outlines, tab }: { regions: Region[] |
             <FlatMap dots={dots} boxes={boxes} highlight={highlight} height={300} onDot={setHighlight}
               caption="Dashed boxes are monitored regions. Red diamonds are high-severity incidents." />
           </section>
-          <section className="panel ev-list" aria-label="Conflict event list">
+          <section className="panel ev-list" aria-label="Source event list">
             {events.error && <ErrorNote message={events.error} onRetry={events.refresh} />}
             {!events.data && !events.error && <div className="pad"><Skeleton rows={6} /></div>}
             {events.data && events.data.length === 0 && (
-              <Empty title="No conflict incidents match">Widen the time range or lower the severity filter.</Empty>
+              <Empty title="No source events match">Widen the time range or lower the severity filter.</Empty>
             )}
             {groups.map(([day, list]) => (
               <div key={day}>
@@ -98,7 +98,7 @@ export default function Events({ regions, outlines, tab }: { regions: Region[] |
                     <span className="mag num">Lvl {e.magnitude.toFixed(1)}</span>
                     <Diamond mag={e.magnitude} />
                     <span className="grow">
-                      {(e.description ?? e.event_type).replace(/^M[\d.]+ earthquake — /, 'Incident: ')}
+                      {(e.description ?? e.event_type)}
                       <span className="block small muted">{e.region_name}</span>
                     </span>
                     <span className="small muted nowrap" title={fmtDateTime(e.event_date)}>{timeAgo(e.event_date)}</span>
@@ -129,11 +129,11 @@ export default function Events({ regions, outlines, tab }: { regions: Region[] |
           </table>
           {anomalies.error && <ErrorNote message={anomalies.error} onRetry={anomalies.refresh} />}
           {anomalies.data && anomalies.data.length === 0 && (
-            <Empty title="Nothing unusual flagged">The model needs at least a day of history per region before it can flag hours.</Empty>
+            <Empty title="Nothing unusual flagged">The model needs sufficient earlier observations and coverage before it can assess unusual hours.</Empty>
           )}
           <p className="note">
-            Each hour is scored against the region's earlier hours with a z-score and an Isolation Forest. Only hours scoring 50 or more, with a z-score of at least 2 or a strong Isolation Forest score, are kept.
-            A flight route deviation during a storm is marked as weather-explained.
+            Each hour is compared with the region's earlier observations using a z-score and an Isolation Forest. The detector retains notable changes only after sufficient prior observations exist.
+            Weather-coincident changes retain their measured severity; coincidence does not establish an explanation.
           </p>
         </section>
       )}

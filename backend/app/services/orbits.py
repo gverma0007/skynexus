@@ -47,9 +47,19 @@ def teme_to_latlonalt(r: tuple[float, float, float] | np.ndarray, gmst: float) -
     return lat, lon, rad - EARTH_RADIUS_KM
 
 
+def satrec(l1: str, l2: str):
+    if l1.startswith('{'):
+        import json
+        from sgp4 import omm
+        sat = Satrec()
+        omm.initialize(sat, json.loads(l1))
+        return sat
+    return Satrec.twoline2rv(l1, l2)
+
+
 def propagate(l1: str, l2: str, when: datetime) -> tuple[float, float, float, float]:
     """(lat, lon, altitude_km, speed_km_s) for one TLE at one instant."""
-    sat = Satrec.twoline2rv(l1, l2)
+    sat = satrec(l1, l2)
     when = when.astimezone(timezone.utc)
     jd, fr = jday(when.year, when.month, when.day, when.hour, when.minute,
                   when.second + when.microsecond / 1e6)
@@ -96,12 +106,12 @@ def positions_now(rows: list[tuple], when: datetime | None = None) -> dict:
     valid = [(k, a, b) for k, a, b in rows if a and b]
     if not valid:
         return {}
-    cache_key = tuple((k, a[18:32]) for k, a, _ in valid)
+    cache_key = tuple((k, a, b) for k, a, b in valid)
     if _batch_cache is None or _batch_cache.key != cache_key:
         sats, ids = [], []
         for k, a, b in valid:
             try:
-                sats.append(Satrec.twoline2rv(a, b))
+                sats.append(satrec(a, b))
                 ids.append(k)
             except Exception:
                 continue
@@ -122,6 +132,13 @@ def positions_now(rows: list[tuple], when: datetime | None = None) -> dict:
 # --------------------------------------------------------- orbital params --
 def orbit_params(l1: str, l2: str) -> dict:
     """Human-readable orbital elements decoded from a TLE."""
+
+    if l1.startswith('{'):
+        import json
+        data=json.loads(l1)
+        sat=satrec(l1,l2)
+        period=1440/float(data['MEAN_MOTION'])
+        return {'inclination_deg':float(data['INCLINATION']),'raan_deg':float(data['RA_OF_ASC_NODE']), 'eccentricity':float(data['ECCENTRICITY']),'arg_perigee_deg':float(data['ARG_OF_PERICENTER']),'mean_anomaly_deg':float(data['MEAN_ANOMALY']),'mean_motion_revs_per_day':float(data['MEAN_MOTION']),'period_minutes':period,'semi_major_axis_km':sat.a*sat.radiusearthkm,'perigee_alt_km':sat.altp*sat.radiusearthkm,'apogee_alt_km':sat.alta*sat.radiusearthkm,'epoch':data['EPOCH'],'tle_line1':None,'tle_line2':None,'element_format':'OMM','omm':data}
 
     def num(line: str, start: int, end: int) -> float:
         try:

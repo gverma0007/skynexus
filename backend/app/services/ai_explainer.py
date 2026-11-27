@@ -21,7 +21,7 @@ DISCLAIMER = "Correlation does not establish causation."
 SYSTEM_PROMPT = """You write short situation assessments for SkyNexus, a dashboard that
 compares a region's recent activity with the period just before it.
 
-You receive computed metrics only: aircraft per hour, conflict & security threat counts and
+You receive computed metrics only: aircraft per hour, natural hazard event counts and
 magnitudes, storm intensity, satellite passes and a 0-100 disruption index.
 
 Rules:
@@ -63,10 +63,10 @@ def template_explanation(m: dict) -> str:
     if ev["after"] > 0:
         largest = ev.get("largest")
         tail = f", the largest {largest}" if largest else ""
-        parts.append(f"{ev['after']} security incident{'s were' if ev['after'] != 1 else ' was'} recorded "
+        parts.append(f"{ev['after']} natural hazard event{'s were' if ev['after'] != 1 else ' was'} recorded "
                      f"(previously {ev['before']}){tail}.")
     elif ev["before"] > 0:
-        parts.append(f"No security incidents were recorded, down from {ev['before']} in the period before.")
+        parts.append(f"No natural hazard events were recorded, down from {ev['before']} in the period before.")
 
     if wx["after"] is not None:
         if wx["after"] >= 40:
@@ -74,8 +74,8 @@ def template_explanation(m: dict) -> str:
             if av["delta_pct"] is not None and av["delta_pct"] <= -10:
                 parts.append("The weather may explain the lower traffic.")
         else:
-            parts.append(f"Storm intensity stayed low ({wx['after']:.0f}/100), so weather is unlikely "
-                         f"to explain changes in traffic.")
+            parts.append(f"Storm intensity stayed low ({wx['after']:.0f}/100), but region-centre weather alone is insufficient "
+                         f"to rule out conditions along flight corridors.")
 
     fdev = m.get("flight_deviations")
     if fdev and fdev.get("significant_deviations", 0) > 0:
@@ -107,9 +107,9 @@ def template_explanation(m: dict) -> str:
 async def get_ai_explanation(metrics: dict) -> tuple[str, str]:
     """Return (text, source) where source is 'claude' or 'template'."""
     settings = get_settings()
-    if not settings.ANTHROPIC_API_KEY:
+    if not settings.ANTHROPIC_API_KEY or not settings.ANTHROPIC_MODEL:
         return f"{template_explanation(metrics)} {DISCLAIMER}", "template"
-    payload = {k: v for k, v in metrics.items() if k != "overall_assessment"}
+    payload = {k: metrics[k] for k in ('region','window_hours','disruption_index','aviation_metrics','events_metrics','weather_metrics','satellite_metrics','data_coverage_pct','limitations','pattern_analysis') if k in metrics}
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             res = await client.post(

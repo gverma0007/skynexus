@@ -40,7 +40,7 @@ export default function FlightPanel({ icao24, onClose }: { icao24: string; onClo
         {f && (
           <div className="score">
             <b className="num" style={{ fontSize: '1.25rem' }}>
-              {f.route ? `${f.route.origin.iata} → ${f.route.dest.iata}` : 'En Route'}
+              {f.route ? `${f.route.origin.iata} → ${f.route.dest.iata}` : 'Route unavailable'}
             </b>
             <div>
               <span className="badge" style={{ background: statusColor(f.deviation?.status), color: '#fff', padding: '2px 8px', borderRadius: 4, fontSize: '0.75rem', fontWeight: 600 }}>

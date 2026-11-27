@@ -3,6 +3,7 @@ import type { GeoProjection } from 'd3-geo';
 import type { Topology } from 'topojson-specification';
 import { draw, nearest, prepareAtlas, regionAt } from './draw';
 import type { Atlas, GlobeEvent, GlobeFlight, GlobeRegion, GlobeSat, Layers } from './draw';
+import type { GlobeView } from './surfaces';
 
 let atlasPromise: Promise<Atlas> | null = null;
 export function loadAtlas(): Promise<Atlas> {
@@ -25,6 +26,8 @@ export function useAtlas(): Atlas | null {
 }
 
 interface Props {
+  initialView?: GlobeView;
+  compact?: boolean;
   regions: GlobeRegion[];
   flights: GlobeFlight[];
   sats: GlobeSat[];
@@ -48,6 +51,8 @@ interface Tip {
 const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 export default function Globe(props: Props) {
+  const [view, setView] = useState<GlobeView>(props.initialView ?? 'earth');
+  const [texture, setTexture] = useState<ImageData | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const projRef = useRef<GeoProjection | null>(null);
@@ -61,6 +66,19 @@ export default function Globe(props: Props) {
   const anim = useRef<number | null>(null);
   const rotateRef = useRef(rotate);
   rotateRef.current = rotate;
+  useEffect(() => {
+    const img = new Image();
+    let alive = true;
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx && alive) { ctx.drawImage(img, 0, 0); setTexture(ctx.getImageData(0, 0, canvas.width, canvas.height)); }
+    };
+    img.src = '/imagery/earth.jpg';
+    return () => { alive = false; };
+  }, []);
 
   // size
   useEffect(() => {
@@ -113,11 +131,11 @@ export default function Globe(props: Props) {
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     projRef.current = draw(ctx, size.w, size.h, {
-      atlas, rotate, zoom, regions: props.regions, flights: props.flights, sats: props.sats,
+      view, texture, atlas, rotate, zoom, regions: props.regions, flights: props.flights, sats: props.sats,
       events: props.events, layers: props.layers, selectedRegion: props.selectedRegion,
       selectedSat: props.selectedSat, hoverRegion,
     });
-  }, [atlas, rotate, zoom, size, props.regions, props.flights, props.sats, props.events, props.layers,
+  }, [view, texture, atlas, rotate, zoom, size, props.regions, props.flights, props.sats, props.events, props.layers,
     props.selectedRegion, props.selectedSat, hoverRegion]);
 
   const pick = (x: number, y: number) => {
@@ -125,15 +143,15 @@ export default function Globe(props: Props) {
     if (!proj) return null;
     const { layers } = props;
     if (layers.satellites) {
-      const s = nearest(proj, rotate, props.sats, x, y, 7);
+      const s = nearest(proj, rotate, props.sats, x, y, 7, view === 'flat');
       if (s) return { kind: 'sat' as const, item: s };
     }
     if (layers.events) {
-      const e = nearest(proj, rotate, props.events, x, y, 7);
+      const e = nearest(proj, rotate, props.events, x, y, 7, view === 'flat');
       if (e) return { kind: 'event' as const, item: e };
     }
     if (layers.aircraft) {
-      const f = nearest(proj, rotate, props.flights, x, y, 5);
+      const f = nearest(proj, rotate, props.flights, x, y, 5, view === 'flat');
       if (f) return { kind: 'flight' as const, item: f };
     }
     const r = regionAt(proj, props.regions, x, y);
@@ -169,7 +187,7 @@ export default function Globe(props: Props) {
     if (!hit) return setTip(null);
     if (hit.kind === 'sat') setTip({ x, y, title: hit.item.label, sub: 'Satellite. Click for orbit details.' });
     else if (hit.kind === 'event') setTip({ x, y, title: hit.item.label });
-    else if (hit.kind === 'flight') setTip({ x, y, title: hit.item.label, sub: 'Aircraft route. Click for planned vs actual path.' });
+    else if (hit.kind === 'flight') setTip({ x, y, title: hit.item.label, sub: 'Click for recorded observations and available route evidence.' });
     else setTip({ x, y, title: `${hit.item.name}`, sub: `Disruption index ${Math.round(hit.item.score)}` });
   };
 
@@ -212,7 +230,11 @@ export default function Globe(props: Props) {
   const cursor = useMemo(() => (hoverRegion || tip ? 'pointer' : 'grab'), [hoverRegion, tip]);
 
   return (
-    <div ref={wrapRef} className="globe">
+    <div ref={wrapRef} className={`globe globe-${view} ${props.compact ? 'globe-compact' : ''}`}>
+      {!props.compact && <div className="globe-views" role="group" aria-label="Map appearance">
+        {([['earth', 'Earth'], ['line', 'Line'], ['dots', 'Dots'], ['flat', 'Flat map']] as const).map(([key, label]) =>
+          <button key={key} onClick={() => setView(key)} aria-pressed={view === key} className={view === key ? 'active' : ''}>{label}</button>)}
+      </div>}
       <canvas
         ref={canvasRef}
         style={{ width: size.w, height: size.h, cursor }}
@@ -240,6 +262,7 @@ export default function Globe(props: Props) {
         <button onClick={() => setZoom((z) => Math.max(0.8, z / 1.25))} aria-label="Zoom out">−</button>
         <button onClick={() => { setZoom(1); setRotate([-60, -22]); }} aria-label="Reset view" className="small">⟲</button>
       </div>
+      {view === 'earth' && <a className="map-credit" href="https://science.nasa.gov/earth/earth-observatory/blue-marble-next-generation/base-map/" target="_blank" rel="noreferrer">{texture ? 'NASA Blue Marble · Reference imagery' : 'Reference globe · Imagery loading'}</a>}
     </div>
   );
 }

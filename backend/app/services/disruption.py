@@ -7,7 +7,7 @@ own recent normal:
   hours vs the same hours of day across the prior 7 days. Both surges and
   drops count (a drop is what an airspace closure looks like). Scored from
   the z-score: |z| <= 1 is normal (0), |z| = 4 or more is 100.
-- Conflict & security threats (30%): magnitude-weighted points for the last 24 h,
+- Natural hazard event context (not added to operational score): magnitude-weighted points for the last 24 h,
   decaying with a 12 h time constant.
 - Storm intensity (25%): latest storm index (0-100) at the region centre.
 
@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.services.series import RegionSeries, SeriesBundle, get_series
 
-WEIGHTS = {"flights": 0.30, "events": 0.40, "weather": 0.15, "satellites": 0.15}
+WEIGHTS = {"flights": 0.5, "events": 0.0, "weather": 0.5, "satellites": 0.0}
 RECENT_HOURS = 3
 MIN_BASELINE_HOURS = 12
 
@@ -239,13 +239,13 @@ def explain(name: str, s: dict) -> list[str]:
     devs = f.get("route_deviations", {})
     if devs.get("significant_count", 0) > 0:
         if (w["storm_now"] or 0) < 35:
-            lines.append(f"Airspace conflict avoidance: {devs['significant_count']} aircraft diverting up to {devs['max_km']:.0f} km off corridor in clear skies.")
+            lines.append(f"{devs['significant_count']} aircraft differ from an available route reference by up to {devs['max_km']:.0f} km. Region-centre weather does not establish a cause.")
         else:
             lines.append(f"High flight route deviations detected ({devs['significant_count']} aircraft diverting up to {devs['max_km']:.0f} km off planned corridor).")
     elif devs.get("minor_count", 0) > 0:
         lines.append(f"Minor route diversions detected ({devs['minor_count']} aircraft off nominal route).")
     else:
-        lines.append("Flight routes are following nominal corridors.")
+        lines.append("No significant deviations from available route references were identified." if devs.get('count',0) else "Flight-route assessment is unavailable without attributed route references.")
 
     # Air traffic volume context (informational)
     if f.get("pct_change") is not None and abs(f["pct_change"]) >= 15:
@@ -253,14 +253,14 @@ def explain(name: str, s: dict) -> list[str]:
         lines.append(f"Air traffic volume is {abs(f['pct_change']):.0f}% {word} its diurnal average.")
 
     if e.get("largest"):
-        lines.append(f"{e['count_24h']} security incident{'s' if e['count_24h'] != 1 else ''} in 24 h; "
+        lines.append(f"{e['count_24h']} natural hazard event{'s' if e['count_24h'] != 1 else ''} in 24 h; "
                      f"largest {e['largest']['label']}.")
     if w["storm_now"] is not None and w["storm_now"] >= 40:
         lines.append(f"Storm intensity is high ({w['storm_now']:.0f}/100).")
     if devs.get("deviating_count", 0) > 0 and (w["storm_now"] or 0) >= 40:
-        lines.append("Severe weather explains flight corridor deviations.")
+        lines.append("Route-reference deviations coincide with elevated regional storm intensity; a corridor-specific explanation remains unverified.")
     elif devs.get("deviating_count", 0) > 0 and (w["storm_now"] or 0) < 35 and sat.get("score", 0) >= 30:
-        lines.append("War & conflict early warning: Coincident satellite surveillance surge and flight corridor avoidance.")
+        lines.append("Route-reference deviations coincide with elevated orbital context. This does not establish intent or a cause.")
 
     # Satellite density and orbital context
     if sat.get("count", 0) > 0:
@@ -275,11 +275,11 @@ def explain(name: str, s: dict) -> list[str]:
             s_word = "surge" if sat["density_change_pct"] > 0 else "drop"
             lines.append(f"Satellite density {s_word} detected ({abs(sat['density_change_pct']):.0f}% vs baseline).")
         elif sat.get("leo_earthobs", 0) >= 3:
-            lines.append(f"Elevated LEO Earth-observation surveillance density ({sat['leo_earthobs']} passes overhead).")
+            lines.append(f"{sat['leo_earthobs']} predicted LEO Earth-observation positions overhead; overflight does not establish active imaging or intent.")
         elif sat.get("score", 0) >= 30:
             lines.append(f"Satellite coverage density is elevated ({sat['count']} overhead{orbit_str}).")
         elif by_orb.get("meo", 0) >= 2:
-            lines.append(f"Satellite coverage active: {sat['count']} overhead{orbit_str} with nominal navigation geometry.")
+            lines.append(f"Predicted satellite positions: {sat['count']} overhead{orbit_str}; this does not measure navigation service quality.")
     return lines
 
 

@@ -1,4 +1,7 @@
 // Typed client for the SkyNexus API.
+import { viewer } from './viewer';
+import type { ResearchArtifact } from './research-types';
+import type { Exposure } from './research-types';
 
 export type Severity = 'normal' | 'low' | 'medium' | 'high';
 export type Status = 'Calm' | 'Watch' | 'Elevated' | 'Critical';
@@ -260,6 +263,23 @@ export interface MetricDelta {
 }
 
 export interface Report {
+  source_evidence?: { id: string | number; source: string; kind: string; observed_at: string; received_at: string; relation: string; payload: Record<string, unknown> }[];
+  exposures?: Exposure[];
+  alternative_explanations?: { explanation: string; support: string }[];
+  pattern_analysis?: {
+    method: string; baseline_hours?: number; complete_hours?: number; observed_hours?: number; missing_hours?: number;
+    reference_band_hours?: number; below_band_hours?: number; above_band_hours?: number;
+    longest_run_outside_band_hours?: number; weather_coincident_outside_band_hours?: number;
+    flagged_hours?: { time: string; direction: string; aircraft: number; reference_band: [number, number] | null; storm: number | null }[];
+    limitations?: string[];
+  };
+  artifacts?: ResearchArtifact[];
+  data_coverage_pct?: number;
+  confidence_definition?: string;
+  evidence_support?: string;
+  method_version?: string;
+  dataset_mode?: string;
+  limitations?: string[];
   id?: string;
   generated_at?: string;
   region: { id: string; name: string };
@@ -341,7 +361,9 @@ export interface SearchResult {
   satellites: { norad_id: number; name: string; category: string; category_label: string }[];
 }
 
-const BASE = `${import.meta.env.VITE_API_URL ?? ''}/api`;
+export const BASE = `${import.meta.env.VITE_API_URL ?? ''}/api`;
+const responseCache = new Map<string, unknown>();
+export function clearApiCache() { responseCache.clear(); }
 
 export class ApiError extends Error {
   status: number;
@@ -351,10 +373,22 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const context = viewer.get();
+  const isAuth = path.startsWith('/auth/');
+  const frozenRead = !/^\/(experiments|cases|reports)(\/|\?|$)/.test(path);
+  const cacheKey = `${context.dataset}:${path}`;
+  const read = !init?.method || init.method === 'GET';
+  if (read && !isAuth && frozenRead && !context.realtime && responseCache.has(cacheKey)) return responseCache.get(cacheKey) as T;
+  let target = `${BASE}${path}`;
+  if (!isAuth) {
+    const params = new URLSearchParams({ data_mode: context.dataset === 'demo' ? 'demo' : 'live' });
+    if (context.asOf) params.set('as_of', context.asOf);
+    target += `${path.includes('?') ? '&' : '?'}${params}`;
+  }
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, init);
+    res = await fetch(target, { ...init, credentials: 'include' });
   } catch {
     throw new ApiError(0, 'Cannot reach the SkyNexus API. Check that the backend container is running.');
   }
@@ -366,10 +400,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* not JSON */
     }
-    throw new ApiError(res.status, `${res.status} ${detail}`);
+    if (res.status === 401 && !isAuth) window.dispatchEvent(new Event('skynexus:unauthorized'));
+    throw new ApiError(res.status, detail || `Request failed (${res.status})`);
   }
   if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  const result = await res.json() as T;
+  if (read && !isAuth && (viewer.get().realtime || !context.realtime)) responseCache.set(cacheKey, result);
+  return result;
 }
 
 const q = (params: Record<string, string | number | undefined | null>) => {
@@ -381,6 +418,13 @@ const q = (params: Record<string, string | number | undefined | null>) => {
 };
 
 export const api = {
+  me: () => request<{ email: string; name?: string; role?: string }>('/auth/me'),
+  authOptions: () => request<{ direct_demo_login: boolean }>('/auth/options'),
+  enterDemo: () => request<{ email: string; role?: string }>('/auth/demo', { method: 'POST' }),
+  login: (email: string, password: string) => request<{ email: string }>('/auth/login', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }),
+  }),
+  logout: () => request<void>('/auth/logout', { method: 'POST' }),
   stats: () => request<Stats>('/stats'),
   regions: () => request<Region[]>('/regions'),
   outlines: () => request<Outline[]>('/regions/outline'),

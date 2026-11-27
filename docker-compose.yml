@@ -26,8 +26,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    env_file: .env
+    volumes:
+      - research_artifacts:/app/artifacts
+      - ./backups:/app/backups
     environment:
       DATABASE_URL: postgresql://user:password@db:5432/skynexus
+      REDIS_URL: redis://redis:6379/0
+      COOKIE_SECURE: "false"
+      DEMO_DIRECT_LOGIN: ${DEMO_DIRECT_LOGIN:-true}
       ENV: ${ENV:-production}
       DATA_MODE: ${DATA_MODE:-live}
       DEMO_RESET: ${DEMO_RESET:-0}
@@ -35,7 +42,7 @@ services:
       LIVE_INGEST_INTERVAL_S: ${LIVE_INGEST_INTERVAL_S:-540}
       RETENTION_DAYS: ${RETENTION_DAYS:-3}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
       SEVERITY_LOW: ${SEVERITY_LOW:-20}
       SEVERITY_MEDIUM: ${SEVERITY_MEDIUM:-40}
       SEVERITY_HIGH: ${SEVERITY_HIGH:-70}
@@ -51,5 +58,47 @@ services:
     ports:
       - "${WEB_PORT:-5173}:80"
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+  ingestion:
+    healthcheck:
+      disable: true
+    build: ./backend
+    restart: unless-stopped
+    entrypoint: ["python", "-m", "app.worker"]
+    env_file: .env
+    volumes:
+      - research_artifacts:/app/artifacts
+      - ./backups:/app/backups
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/skynexus
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      backend:
+        condition: service_healthy
+  analysis:
+    healthcheck:
+      disable: true
+    build: ./backend
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c", "rq worker research --url redis://redis:6379/0"]
+    env_file: .env
+    volumes:
+      - research_artifacts:/app/artifacts
+      - ./backups:/app/backups
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/skynexus
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
 volumes:
   postgres_data:
+  redis_data:
+  research_artifacts:

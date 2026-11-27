@@ -22,7 +22,15 @@ def client():
 
     from app.main import app
 
-    return TestClient(app)
+    from app.core.config import base_settings
+    from app.core.auth import password_hasher
+    cfg=base_settings()
+    original=cfg.DEMO_PASSWORD_HASH
+    cfg.DEMO_PASSWORD_HASH=password_hasher.hash('test-only-password')
+    with TestClient(app) as test_client:
+        assert test_client.post('/api/auth/login',json={'email':cfg.DEMO_EMAIL,'password':'test-only-password'}).status_code==200
+        yield test_client
+    cfg.DEMO_PASSWORD_HASH=original
 
 
 def test_health(client):
@@ -83,11 +91,87 @@ def test_system_mode_toggle(client):
     assert res.status_code == 200
     orig_mode = res.json()["data_mode"]
 
-    # Toggle to live
-    set_live = client.post("/api/system/mode", json={"mode": "live"})
-    assert set_live.status_code == 200
-    assert set_live.json()["data_mode"] == "live"
+    # A viewer must not change collection or another viewer's dataset.
+    assert client.post("/api/system/mode", json={"mode": "demo"}).status_code == 403
+    assert client.get("/api/system/mode").json()["data_mode"] == orig_mode
 
-    # Restore original mode
-    client.post("/api/system/mode", json={"mode": orig_mode})
 
+def test_authentication_and_session_isolation(client):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.core.config import base_settings
+    stranger=TestClient(app)
+    assert stranger.get('/api/regions').status_code==401
+    assert stranger.get('/api/sources').status_code==401
+    assert stranger.post('/api/auth/login',json={'email':'wrong@example.org','password':'wrong'}).status_code==401
+    assert stranger.post('/api/auth/login',json={'email':base_settings().DEMO_EMAIL,'password':'test-only-password'}).status_code==200
+    region=client.get('/api/regions').json()[0]['region_id']
+    report=client.post('/api/reports',json={'region_id':region,'hours':6}).json()
+    assert stranger.get('/api/reports/'+report['id']).status_code==404
+    assert report['id'] not in {r['id'] for r in stranger.get('/api/reports').json()}
+    assert report['id'] in {r['id'] for r in client.get('/api/reports').json()}
+    assert client.get('/api/reports/'+report['id']+'/export?format=pdf').headers['content-type']=='application/pdf'
+    markdown=client.get('/api/reports/'+report['id']+'/export?format=markdown').text
+    assert 'Supporting source evidence' in markdown and 'Pattern analysis' in markdown and 'Alternative:' in markdown
+    assert stranger.post('/api/auth/logout').status_code==200
+    assert stranger.get('/api/auth/me').status_code==401
+
+
+def test_research_api_source_truth(client):
+    sources=client.get('/api/sources').json()['sources']
+    ais=next(s for s in sources if s['id']=='aisstream')
+    assert ais['delivery']=='native_stream'
+    assert 'configured' in ais
+    assert client.get('/api/snapshot').status_code==200
+    assert client.get('/api/signals/environment').status_code==200
+    assert client.get('/api/regions?as_of=invalid').status_code==422
+    assert client.post('/api/ingest/live').status_code==403
+
+def test_observation_outbox_and_hourly_feature_are_idempotent(client):
+    from datetime import datetime,timezone
+    from sqlalchemy import select
+    from app.core.db import SessionLocal
+    from app.services.research import record
+    from app.models.research import Observation,HourlyFeature
+    with SessionLocal() as db:
+        try:
+            now=datetime.now(timezone.utc)
+            payload={'metric':'test-metric','entity_id':'test-entity','value':4.5,'unit':'test'}
+            assert record(db,'test-source','research','test-once',now,payload)
+            assert not record(db,'test-source','research','test-once',now,payload)
+            feature=db.scalar(select(HourlyFeature).where(HourlyFeature.source=='test-source'))
+            assert feature.sample_count==1
+            assert feature.value_sum==4.5
+        finally:db.rollback()
+
+
+def test_viewer_dataset_does_not_relabel_live_normalized_signals(client):
+    assert client.get('/api/signals/space?data_mode=demo').json()['observations']==[]
+    assert client.get('/api/signals/space/analysis?data_mode=demo').json()['series']==[]
+    assert client.get('/api/flights/live?as_of=1970-01-01T00:00:00Z').json()==[]
+    assert client.get('/api/events?as_of=1970-01-01T00:00:00Z').json()==[]
+
+def test_satellite_series_excludes_other_dataset(client):
+    from datetime import datetime,timezone
+    from app.core.db import SessionLocal
+    from app.core.config import request_mode
+    from app.models.aviation import Satellite,SatelliteObservation
+    from app.services.series import get_series
+    with SessionLocal() as db:
+        try:
+            when=datetime(2000,1,3,tzinfo=timezone.utc)
+            sat=Satellite(norad_id=100000001,name='Isolated synthetic fixture',category='other')
+            db.add(sat);db.flush()
+            db.add(SatelliteObservation(satellite_id=sat.id,timestamp=when,position='POINTZ(-71 42 400)',altitude_km=400,source='demo_dataset'))
+            db.flush()
+            token=request_mode.set('live')
+            try:
+                live=get_series(db,now=when)
+                assert all(not any(v for v in rs.satellites if v is not None) for rs in live.regions.values())
+            finally:request_mode.reset(token)
+            token=request_mode.set('demo')
+            try:
+                demo=get_series(db,now=when)
+                assert any(any(v for v in rs.satellites if v is not None) for rs in demo.regions.values())
+            finally:request_mode.reset(token)
+        finally:db.rollback()

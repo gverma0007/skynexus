@@ -21,12 +21,22 @@ for attempt in range(60):
 sys.exit("database never became available")
 PY
 
+echo "[skynexus] ensuring geospatial extensions..."
+python - <<'PYINIT'
+import os, psycopg2
+with psycopg2.connect(os.environ['DATABASE_URL']) as c:
+    with c.cursor() as cur:
+        cur.execute('CREATE EXTENSION IF NOT EXISTS postgis')
+        cur.execute('CREATE EXTENSION IF NOT EXISTS pgcrypto')
+PYINIT
 echo "[skynexus] applying migrations..."
 alembic upgrade head
 
 echo "[skynexus] seeding regions and airports..."
 python -m app.data.seed_regions
 python -m app.data.seed_airports
+python -m app.data.seed_study_regions
+python -m app.data.seed_exposure_demo
 
 MODE="${DATA_MODE:-live}"
 if [ "$MODE" = "demo" ]; then
@@ -39,8 +49,9 @@ if [ "$MODE" = "demo" ]; then
   fi
 else
   echo "[skynexus] live mode: removing any demo rows"
-  python -m app.data.seed_airports --purge-synthetic
-  python -m app.data.seed_satellites
+  # Keep source-isolated synthetic records available to viewer replay.
+  # Source-isolated synthetic data is available without altering live records.
+  python -m app.data.ensure_demo
 fi
 
 PORT="${PORT:-8000}"

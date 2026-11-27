@@ -114,11 +114,8 @@ def _diurnal(hour_utc: int, lon: float) -> float:
 def reset_database():
     logger.info("Clearing observation data (schema and regions are kept)...")
     with engine.begin() as conn:
-        conn.execute(text(
-            "TRUNCATE flight_observations, weather_observations, satellite_observations, events, "
-            "satellites, anomaly_scores, event_correlations, disruption_index, forecasts, "
-            "what_changed_reports RESTART IDENTITY CASCADE"
-        ))
+        for table in ('flight_observations','weather_observations','satellite_observations','events'):
+            conn.execute(text(f"DELETE FROM {table} WHERE source='demo_dataset'"))
 
 
 def _route_per_region(conn) -> dict[str, str]:
@@ -214,16 +211,16 @@ def generate(rng: random.Random) -> dict:
 
         # satellites
         sat_rows, obs_rows = [], []
-        for prefix, category, n, inc, mm, ecc, first in CONSTELLATIONS:
+        for group_index, (prefix, category, n, inc, mm, ecc, first) in enumerate(CONSTELLATIONS):
             planes = max(1, min(n, 6))
             for k in range(n):
-                norad = first + k
+                norad = 80000 + group_index * 500 + k
                 label = prefix if n == 1 else f"{prefix}-{k + 1:02d}" if prefix not in ("STARLINK", "ONEWEB") \
                     else f"{prefix}-{norad % 10000:04d}"
                 raan = (360.0 / planes) * (k % planes) + rng.uniform(-3, 3)
                 ma = (360.0 / max(1, n // planes)) * (k // planes) + rng.uniform(0, 30)
                 l1, l2 = make_tle(norad, inc, raan, ecc, rng.uniform(0, 360), ma, mm, now)
-                sat_rows.append((norad, label, category, l1, l2))
+                sat_rows.append((norad, "Synthetic " + label, category, l1, l2))
         execute_values(cur, """
             INSERT INTO satellites (id, norad_id, name, category, tle_line1, tle_line2) VALUES %s
             ON CONFLICT (norad_id) DO UPDATE
@@ -260,7 +257,7 @@ def generate(rng: random.Random) -> dict:
 
 def _quake(region_id, when, mag, place, lat, lon, rng):
     sev = "High" if mag >= 5.5 else "Medium" if mag >= 4.0 else "Low"
-    return (f"demo-{rng.randint(0, 10**9)}", when, "Conflict Incident", "Geopolitical / Security Threat", sev,
+    return (f"demo-{rng.randint(0, 10**9)}", when, "Earthquake", "Natural hazard", sev,
             f"POINT({lon:.3f} {lat:.3f})", region_id, f"Security alert (Lvl {mag:.1f}) — {place}", SRC)
 
 

@@ -31,6 +31,7 @@ def test_weather_explains_drop():
 
 def test_falls_back_when_api_fails(monkeypatch):
     monkeypatch.setattr(get_settings(), "ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(get_settings(), "ANTHROPIC_MODEL", "test-model")
 
     class Boom(httpx.AsyncClient):
         async def post(self, *a, **k):

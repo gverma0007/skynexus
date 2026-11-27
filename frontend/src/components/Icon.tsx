@@ -1,0 +1,33 @@
+const paths: Record<string, string> = {
+  globe: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z',
+  dashboard: 'M3 3h7v7H3zM14 3h7v11h-7zM3 14h7v7H3zM14 18h7v3h-7z',
+  explore: 'M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0Zm6 3 2-6 6-2-2 6-6 2Z',
+  incidents: 'm12 3 10 18H2L12 3Zm0 6v5m0 3h.01',
+  regions: 'm3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Zm6-3v15m6-12v15',
+  forecasts: 'M3 18 8 12l4 3 8-11M15 4h5v5M3 21h18',
+  replay: 'M3 11a9 9 0 1 1 3 8M3 4v7h7m0-3 7 4-7 4V8Z',
+  experiments: 'M9 3h6M10 3v6L4 19a1 1 0 0 0 1 2h14a1 1 0 0 0 1-2L14 9V3M7 15h10',
+  reports: 'M5 3h10l4 4v14H5V3Zm9 0v5h5M8 12h8m-8 4h6',
+  sources: 'M20 6c0 2-16 2-16 0s16-3 16 0ZM4 6v6c0 3 16 3 16 0V6M4 12v6c0 3 16 3 16 0v-6',
+  signals: 'M3 12h4l3-8 4 16 3-8h4',
+  book: 'M12 5c-3-2-6-2-9-1v16c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1Zm0 0v16',
+  search: 'M16 16 21 21M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z',
+  arrow: 'M4 12h16m-6-6 6 6-6 6',
+  chevron: 'm9 5 7 7-7 7',
+  logout: 'M9 3H4v18h5m0-9h12m-5-5 5 5-5 5',
+  menu: 'M4 6h16M4 12h16M4 18h16',
+  check: 'm5 12 4 4L19 6',
+  shield: 'm12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Zm-4 9 3 3 5-6',
+  pause: 'M8 5v14M16 5v14',
+  play: 'm8 4 12 8-12 8V4Z',
+  refresh: 'M20 8a8 8 0 0 0-14-3L3 8m0-5v5h5M4 16a8 8 0 0 0 14 3l3-3m0 5v-5h-5',
+  layers: 'm12 3 10 5-10 5L2 8l10-5ZM2 12l10 5 10-5M2 16l10 5 10-5',
+  close: 'm6 6 12 12M6 18 18 6',
+  minimise: 'M5 18h14',
+  maximise: 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5',
+  restore: 'M8 8V4h12v12h-4M4 8h12v12H4V8Z',
+  eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Zm13 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
+};
+export default function Icon({ name, size = 18 }: { name: string; size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name] ?? paths.globe} /></svg>;
+}

@@ -26,15 +26,11 @@ _catalog_cache: TTLCache[list[tuple]] = TTLCache(ttl_seconds=60.0)
 
 def catalog(db: Session) -> list[tuple]:
     """[(norad, name, category, l1, l2)] cached for 60 s."""
-    cached = _catalog_cache.get()
-    if cached is not None:
-        return cached
-
-    rows = [tuple(r) for r in db.execute(text(
-        "SELECT norad_id, name, COALESCE(category, 'other'), tle_line1, tle_line2 FROM satellites"
-    )).all()]
-    _catalog_cache.set(rows)
-    return rows
+    from app.core.config import get_settings
+    source='demo_dataset' if get_settings().DATA_MODE=='demo' else 'celestrak'
+    return [tuple(r) for r in db.execute(text(
+        "SELECT norad_id,name,COALESCE(category,'other'),tle_line1,tle_line2 FROM satellites s WHERE EXISTS (SELECT 1 FROM satellite_observations o WHERE o.satellite_id=s.id AND o.source=:source)"
+    ), {'source':source}).all()]
 
 
 def invalidate() -> None:
@@ -42,7 +38,8 @@ def invalidate() -> None:
 
 
 def live_positions(db: Session, when: datetime | None = None) -> list[dict]:
-    when = when or datetime.now(timezone.utc)
+    from app.core.config import request_as_of
+    when = when or request_as_of.get() or datetime.now(timezone.utc)
     cat = catalog(db)
     pos = positions_now([(norad, l1, l2) for norad, _, _, l1, l2 in cat], when)
     shapes = region_shapes(db)
@@ -61,6 +58,8 @@ def live_positions(db: Session, when: datetime | None = None) -> list[dict]:
             "region_id": reg["id"] if reg else None,
             "region_name": reg["name"] if reg else None,
             "timestamp": when.isoformat(),
+            "kind": "predicted",
+            "position_method": "SGP4 propagation; not a live measurement",
         })
     return out
 

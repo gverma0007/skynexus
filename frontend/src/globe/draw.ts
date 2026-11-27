@@ -1,5 +1,7 @@
 // Line-art globe rendering on a 2D canvas (d3-geo orthographic projection).
-import { geoArea, geoContains, geoDistance, geoGraticule10, geoOrthographic, geoPath } from 'd3-geo';
+import { geoArea, geoContains, geoDistance, geoEquirectangular, geoGraticule10, geoOrthographic, geoPath } from 'd3-geo';
+import { atmosphere, earthSurface, landPoints } from './surfaces';
+import type { GlobeView } from './surfaces';
 import type { GeoPermissibleObjects, GeoProjection } from 'd3-geo';
 import type { Feature, MultiLineString, MultiPolygon, Polygon } from 'geojson';
 import { feature, mesh } from 'topojson-client';
@@ -47,6 +49,8 @@ export interface Layers {
 }
 
 export interface DrawInput {
+  view?: GlobeView;
+  texture?: ImageData | null;
   atlas: Atlas | null;
   rotate: [number, number];
   zoom: number;
@@ -109,34 +113,52 @@ export function isVisible(rotate: [number, number], lon: number, lat: number): b
 }
 
 export function draw(ctx: CanvasRenderingContext2D, w: number, h: number, d: DrawInput): GeoProjection {
-  const proj = makeProjection(w, h, d.rotate, d.zoom);
+  const view = d.view ?? 'line';
+  const flat = view === 'flat';
+  const dark = view === 'dots' || flat;
+  const ink = dark ? '#E5EFEE' : view === 'earth' ? '#F7FAFC' : COLORS.ink;
+  const visible = (lon: number, lat: number) => flat || isVisible(d.rotate, lon, lat);
+  const proj = flat ? geoEquirectangular().translate([w / 2, h / 2]).scale(Math.min(w / (2 * Math.PI) - 14, h / Math.PI - 25) * d.zoom).rotate([d.rotate[0], 0]) : makeProjection(w, h, d.rotate, d.zoom * 0.88);
   const path = geoPath(proj, ctx);
   ctx.clearRect(0, 0, w, h);
+  if (view === 'earth') atmosphere(ctx, proj);
 
   ctx.beginPath();
   path({ type: 'Sphere' });
-  ctx.fillStyle = '#FFFFFF';
+  ctx.fillStyle = dark ? '#14222A' : view === 'earth' ? '#286589' : '#FFFFFF';
   ctx.fill();
 
   ctx.beginPath();
   path(geoGraticule10());
   ctx.lineWidth = 0.5;
-  ctx.strokeStyle = COLORS.grid;
+  ctx.strokeStyle = dark ? '#25363F' : view === 'earth' ? 'rgba(224,238,247,.2)' : COLORS.grid;
   ctx.stroke();
 
-  if (d.atlas) {
+  if (d.atlas && !dark) {
     ctx.beginPath();
     path(d.atlas.land as GeoPermissibleObjects);
-    ctx.fillStyle = COLORS.land;
+    ctx.fillStyle = view === 'earth' ? '#83A77E' : COLORS.land;
     ctx.fill();
     ctx.lineWidth = 0.8;
-    ctx.strokeStyle = '#1A1A1A';
+    ctx.strokeStyle = view === 'earth' ? 'rgba(255,255,255,.3)' : '#1A1A1A';
     ctx.stroke();
     ctx.beginPath();
     path(d.atlas.borders);
     ctx.lineWidth = 0.4;
     ctx.strokeStyle = COLORS.border;
     ctx.stroke();
+  }
+  if (view === 'earth') earthSurface(ctx, proj, w, h, d.texture ?? null);
+  if (d.atlas && dark) {
+    ctx.fillStyle = '#A1B9BC';
+    for (const [lon, lat] of landPoints(d.atlas)) {
+      if (!visible(lon, lat)) continue;
+      const point = proj([lon, lat]);
+      if (!point) continue;
+      ctx.beginPath();
+      ctx.arc(point[0], point[1], Math.max(0.6, Math.min(1.7, proj.scale() / 160)), 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // Regions: ink density = severity
@@ -152,7 +174,7 @@ export function draw(ctx: CanvasRenderingContext2D, w: number, h: number, d: Dra
       }
       ctx.setLineDash(reg.level === 0 && !sel ? [3, 3] : []);
       ctx.lineWidth = sel ? 2.2 : hover ? 1.6 : reg.level === 3 ? 1.4 : 0.9;
-      ctx.strokeStyle = reg.level === 3 ? COLORS.signal : COLORS.ink;
+      ctx.strokeStyle = reg.level === 3 ? '#F57865' : ink;
       ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -160,11 +182,11 @@ export function draw(ctx: CanvasRenderingContext2D, w: number, h: number, d: Dra
 
   // Aircraft: short ticks along heading
   if (d.layers.aircraft) {
-    ctx.strokeStyle = COLORS.ink;
+    ctx.strokeStyle = ink;
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (const f of d.flights) {
-      if (!isVisible(d.rotate, f.lon, f.lat)) continue;
+      if (!visible(f.lon, f.lat)) continue;
       const p = proj([f.lon, f.lat]);
       if (!p) continue;
       const a = ((f.heading - 90) * Math.PI) / 180;
@@ -179,10 +201,10 @@ export function draw(ctx: CanvasRenderingContext2D, w: number, h: number, d: Dra
   // Satellites: hollow rings
   if (d.layers.satellites) {
     ctx.lineWidth = 0.9;
-    ctx.strokeStyle = COLORS.ink2;
+    ctx.strokeStyle = view === 'line' ? COLORS.ink2 : '#A7DBE6';
     ctx.beginPath();
     for (const s of d.sats) {
-      if (s.id === d.selectedSat || !isVisible(d.rotate, s.lon, s.lat)) continue;
+      if (s.id === d.selectedSat || !visible(s.lon, s.lat)) continue;
       const p = proj([s.lon, s.lat]);
       if (!p) continue;
       ctx.moveTo(p[0] + 2.3, p[1]);
@@ -190,7 +212,7 @@ export function draw(ctx: CanvasRenderingContext2D, w: number, h: number, d: Dra
     }
     ctx.stroke();
     const sel = d.sats.find((s) => s.id === d.selectedSat);
-    if (sel && isVisible(d.rotate, sel.lon, sel.lat)) {
+    if (sel && visible(sel.lon, sel.lat)) {
       const p = proj([sel.lon, sel.lat]);
       if (p) {
         ctx.beginPath();
@@ -209,7 +231,7 @@ export function draw(ctx: CanvasRenderingContext2D, w: number, h: number, d: Dra
   // Conflict & security threats: diamonds sized by severity
   if (d.layers.events) {
     for (const e of d.events) {
-      if (!isVisible(d.rotate, e.lon, e.lat)) continue;
+      if (!visible(e.lon, e.lat)) continue;
       const p = proj([e.lon, e.lat]);
       if (!p) continue;
       const s = Math.max(2.5, 2 + (e.mag - 2.5) * 1.4);
@@ -219,7 +241,7 @@ export function draw(ctx: CanvasRenderingContext2D, w: number, h: number, d: Dra
       ctx.lineTo(p[0], p[1] + s);
       ctx.lineTo(p[0] - s, p[1]);
       ctx.closePath();
-      ctx.fillStyle = e.mag >= 5.5 ? COLORS.signal : COLORS.ink;
+      ctx.fillStyle = e.mag >= 5.5 ? '#F57865' : ink;
       ctx.fill();
     }
   }
@@ -228,7 +250,7 @@ export function draw(ctx: CanvasRenderingContext2D, w: number, h: number, d: Dra
   ctx.beginPath();
   path({ type: 'Sphere' });
   ctx.lineWidth = 1.25;
-  ctx.strokeStyle = COLORS.ink;
+  ctx.strokeStyle = view === 'line' ? COLORS.ink : dark ? '#314550' : 'rgba(255,255,255,.45)';
   ctx.stroke();
 
   // Labels for notable or selected regions
@@ -239,7 +261,7 @@ export function draw(ctx: CanvasRenderingContext2D, w: number, h: number, d: Dra
     for (const reg of d.regions) {
       const sel = reg.id === d.selectedRegion;
       if (reg.level < 1 && !sel && reg.id !== d.hoverRegion) continue;
-      if (!isVisible(d.rotate, reg.lon, reg.lat)) continue;
+      if (!visible(reg.lon, reg.lat)) continue;
       const p = proj([reg.lon, reg.lat]);
       if (!p) continue;
       const label = `${reg.name}  ${Math.round(reg.score)}`;
@@ -277,11 +299,12 @@ export function regionAt(proj: GeoProjection, regions: GlobeRegion[], x: number,
 
 export function nearest<T extends GlobePoint>(
   proj: GeoProjection, rotate: [number, number], items: T[], x: number, y: number, maxPx: number,
+  flat = false,
 ): T | null {
   let best: T | null = null;
   let bestD = maxPx * maxPx;
   for (const it of items) {
-    if (!isVisible(rotate, it.lon, it.lat)) continue;
+    if (!flat && !isVisible(rotate, it.lon, it.lat)) continue;
     const p = proj([it.lon, it.lat]);
     if (!p) continue;
     const dd = (p[0] - x) ** 2 + (p[1] - y) ** 2;
