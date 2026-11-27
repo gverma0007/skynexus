@@ -1,6 +1,6 @@
 # SkyNexus free hosting
 
-Updated 27 November 2026. Selected layout: one sleeping **Render Free** web service and **Neon Free** PostgreSQL/PostGIS in Singapore. The root Dockerfile serves React and FastAPI together on one HTTPS origin. Deployment status and the public URL are recorded after acceptance below.
+Updated 27 November 2026. Public demo: **https://skynexus-research-demo.onrender.com**. One sleeping **Render Free** web service and **Neon Free** PostgreSQL/PostGIS run in Singapore. The root Dockerfile serves React and FastAPI together on one HTTPS origin. Use **Enter demo** on the landing/login page.
 
 ## Free profile
 
@@ -69,5 +69,8 @@ Free hosted compute has no unattended backup worker. Take an independent backup 
 
 - Fresh PostgreSQL 16/PostGIS migrations passed; Neon PostgreSQL 18 preparation passed.
 - Backend: 88 tests passed; frontend production build passed.
-- Constrained-image, hosted deployment and restart verification: recorded after completion.
+- All eight real cases replayed and exported successfully at 0.1 CPU / 512 MiB, with measured peak memory about 326 MiB in the local constrained container. This is a smoke-test measurement, not a concurrent-user capacity guarantee.
+- The public HTTPS deployment replayed all eight cases and generated checksum-verified session exports; GitHub's backend and frontend checks passed.
+- An independent private database backup was restored into a fresh PostgreSQL 18/PostGIS container; the migration revision and stored exports were verified.
+- Restart persistence verification is recorded after the final release below.
 - Natural sleep/wake: requires a full idle interval and is recorded separately from restart checks.

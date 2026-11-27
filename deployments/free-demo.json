@@ -1,0 +1,18 @@
+{
+  "origin": "https://skynexus-research-demo.onrender.com",
+  "branch": "codex/research-workspace-earth-window",
+  "profile": "free_demo",
+  "render": {
+    "service_id": "srv-dc4d94l6e07s73et0kvg",
+    "plan": "free",
+    "region": "singapore",
+    "auto_deploy": false
+  },
+  "neon": {
+    "project_id": "damp-hall-62026542",
+    "database": "neondb",
+    "region": "aws-ap-southeast-1",
+    "plan": "free_v3",
+    "provisioned_via": "vercel_marketplace"
+  }
+}
